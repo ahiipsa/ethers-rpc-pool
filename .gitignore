@@ -38,4 +38,4 @@ lerna-debug.log*
 # Env
 .env
 
-!/src/sandbox.ts
+src/sandbox.ts
