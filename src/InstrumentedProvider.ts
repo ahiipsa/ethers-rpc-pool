@@ -24,6 +24,7 @@ export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
     providerId: string,
     private readonly stats: Stats,
     private readonly limiter: Semaphore,
+    private readonly timeout: number,
     private readonly onEvent?: (e: RpcEvent) => void,
   ) {
     const network = Network.from(chainId);
@@ -61,7 +62,7 @@ export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
 
     try {
       const base = super.send(method, params);
-      const res = await withTimeout(base, 10_000, {
+      const res = await withTimeout(base, this.timeout, {
         chainId: this.chainId,
         providerId: this.providerId,
         method,

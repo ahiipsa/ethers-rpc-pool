@@ -35,6 +35,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
       'p1',
       stats,
       limiter,
+      10_000,
       (e) => events.push(e),
     );
 
@@ -83,6 +84,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
       'p1',
       stats,
       limiter,
+      10000,
       (e) => events.push(e),
     );
 
@@ -126,6 +128,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
       'p1',
       stats,
       limiter,
+      10000,
       (e) => events.push(e),
     );
 
@@ -169,6 +172,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
       'p1',
       stats,
       limiter,
+      10000,
       (e) => events.push(e),
     );
 
@@ -229,6 +233,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
       'p1',
       stats,
       limiter,
+      10000,
     );
 
     // 40 успешных
@@ -272,6 +277,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
       'p1',
       stats,
       limiter,
+      10000,
     );
 
     const a = p.send('eth_blockNumber', []);

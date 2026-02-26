@@ -68,7 +68,7 @@ import { RPCPoolProvider } from 'ethers-rpc-pool';
 const poolProvider = new RPCPoolProvider({
   chainId: 1,
   urls: ['http://rpc1.invalid', 'http://rpc2.invalid'],
-  perUrl: { inFlight: 1 },
+  perUrl: { inFlight: 1, timeout: 3000 },
   retry: { attempts: 2 },
 });
 
@@ -102,13 +102,14 @@ interface RPCPoolProviderParams {
 
 ### Options Explained
 
-| Option            | Description                               |
-| ----------------- | ----------------------------------------- |
-| `chainId`         | Target chain ID                           |
-| `urls`            | List of RPC endpoints                     |
-| `perUrl.inFlight` | Max concurrent requests per endpoint      |
-| `retry.attempts`  | Maximum number of unique endpoints to try |
-| `hooks.onEvent`   | Optional instrumentation hook             |
+| Option            | Description                                             |
+| ----------------- | ------------------------------------------------------- |
+| `chainId`         | Target chain ID                                         |
+| `urls`            | List of RPC endpoints                                   |
+| `perUrl.inFlight` | Max concurrent requests per endpoint                    |
+| `perUrl.timeout`  | Timeout in ms for each request to this URL, default 10s |
+| `retry.attempts`  | Maximum number of unique endpoints to try               |
+| `hooks.onEvent`   | Optional instrumentation hook                           |
 
 ---
 

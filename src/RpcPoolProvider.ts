@@ -8,7 +8,7 @@ import { Router } from './Router';
 export interface RPCPoolProviderParams {
   chainId: number;
   urls: string[];
-  perUrl: { inFlight: number };
+  perUrl: { inFlight: number; timeout?: number };
   retry: { attempts: number };
   hooks?: {
     onEvent(e: RpcEvent): void;
@@ -36,12 +36,15 @@ export class RPCPoolProvider extends JsonRpcProvider {
       const providerId = `rpc#${i + 1}-chainId:${this.params.chainId}-${url}`;
       const limiter = new Semaphore(this.params.perUrl.inFlight);
 
+      const timeout = this.params.perUrl.timeout ?? 10_000;
+
       const provider = new InstrumentedStaticJsonRpcProvider(
         url,
         this.params.chainId,
         providerId,
         this.stats,
         limiter,
+        timeout,
         this.params.hooks?.onEvent,
       );
 
