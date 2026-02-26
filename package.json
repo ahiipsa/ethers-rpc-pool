@@ -1,7 +1,16 @@
 {
   "name": "ethers-rpc-pool",
   "version": "1.0.3",
+  "description": "EVM RPC multiplexer for ethers.js with load balancing, rate limiting, failover and consistency controls.",
   "license": "MIT",
+  "keywords": [
+    "ethereum",
+    "rpc",
+    "ethers",
+    "load-balancer",
+    "evm",
+    "failover"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/ahiipsa/ethers-rpc-pool.git"
