@@ -1,3 +1,6 @@
+![npm](https://img.shields.io/npm/v/ethers-rpc-pool)
+![license](https://img.shields.io/npm/l/ethers-rpc-pool)
+
 # ethers-rpc-pool
 
 Multi-endpoint RPC pool provider for **ethers.js** with built-in load balancing, per-endpoint concurrency limits, retry with exponential backoff, and instrumentation.
@@ -39,6 +42,13 @@ Most production apps rely on a single RPC provider. This creates:
 - ⚡ Automatic failover on retryable errors
 - 📊 Built-in request statistics
 - 🧩 Drop-in replacement for `JsonRpcProvider`
+
+---
+
+## Requirements
+
+- Node >= 18
+- ethers v6
 
 ---
 
