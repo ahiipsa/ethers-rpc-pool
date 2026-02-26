@@ -20,7 +20,7 @@ Designed for production backends and dApps that need:
 Most production apps rely on a single RPC provider. This creates:
 
 - Single point of failure
-- Hard rate limits (RPS / in-flight)
+- Hard concurrency limits (RPS / in-flight)
 - Increased timeout risk during traffic spikes
 - Cascading retry storms
 
@@ -74,8 +74,8 @@ const poolProvider = new RPCPoolProvider({
 
 // Use it like a regular `JsonRpcProvider`:
 
-const blockNumber = await pool.getBlockNumber();
-const balance = await pool.getBalance('0x...');
+const blockNumber = await poolProvider.getBlockNumber();
+const balance = await poolProvider.getBalance('0x...');
 ```
 
 ---
@@ -180,7 +180,7 @@ This allows integration with:
 
 ```ts
 const stats = pool.getStats();
-console.log(status.snapshot());
+console.log(stats.snapshot());
 ```
 
 ### Example output:
@@ -238,7 +238,7 @@ Useful for:
 
 ### Known Limitations
 
-- No circuit breaker yet
+- Basic circuit breaker/cooldown
 - No sticky session/blockTag consistency yet
 - No built-in JSON-RPC batching
 - Archive/debug/trace methods depend on underlying RPC support
@@ -281,6 +281,7 @@ Not intended for:
 
 ## Roadmap
 
+- RPS rate limiting
 - Circuit breaker + health scoring
 - Sticky session / blockTag consistency
 - Adaptive latency-based routing
