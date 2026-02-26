@@ -2,6 +2,14 @@
   "name": "ethers-rpc-pool",
   "version": "1.0.3",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ahiipsa/ethers-rpc-pool.git"
+  },
+  "homepage": "https://github.com/ahiipsa/ethers-rpc-pool#readme",
+  "bugs": {
+    "url": "https://github.com/ahiipsa/ethers-rpc-pool/issues"
+  },
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
