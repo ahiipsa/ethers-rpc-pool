@@ -201,4 +201,41 @@ describe('RPCPoolProvider', () => {
     expect(sizeSpy).toHaveBeenCalledTimes(1);
     expect(pickSpy).toHaveBeenCalledTimes(0);
   });
+
+  it('send(): respects RPS limit by delaying requests when rate limit is reached', async () => {
+    vi.useFakeTimers();
+    const startTime = Date.now();
+    vi.setSystemTime(startTime);
+
+    const baseSend = vi.spyOn(JsonRpcProvider.prototype, 'send').mockResolvedValue('OK');
+
+    const pool = new RPCPoolProvider({
+      chainId: 1,
+      urls: ['http://rpc1.invalid'],
+      perUrl: { inFlight: 10, rps: 1 }, // 1 requests per second
+      retry: { attempts: 1 },
+    });
+
+    // The first request should go through immediately
+    const p1 = pool.send('eth_blockNumber', []);
+    // Second request should wait for rate limit window
+    const p2 = pool.send('eth_blockNumber', []);
+
+    await flushMicrotasks();
+
+    await expect(p1).resolves.toBe('OK');
+
+    expect(baseSend).toHaveBeenCalledTimes(1);
+
+    await flushMicrotasks();
+
+    // Should not have been called yet
+    expect(baseSend).toHaveBeenCalledTimes(1);
+
+    // Advance time by 1000ms to allow next requests
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await expect(p2).resolves.toBe('OK');
+    expect(baseSend).toHaveBeenCalledTimes(2);
+  });
 });

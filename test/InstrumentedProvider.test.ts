@@ -4,6 +4,7 @@ import { InstrumentedStaticJsonRpcProvider } from '../src/InstrumentedProvider';
 import { Stats } from '../src/Stats';
 import { Semaphore } from '../src/Semaphore';
 import type { RpcEvent } from '../src/utils';
+import { RpsLimiter } from '../src/RpsLimiter';
 
 function flushMicrotasks(): Promise<void> {
   return Promise.resolve().then(() => undefined);
@@ -26,18 +27,15 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
     const baseSend = vi.spyOn(JsonRpcProvider.prototype, 'send').mockResolvedValue('OK');
 
     const stats = new Stats();
-    const limiter = new Semaphore(10);
     const events: RpcEvent[] = [];
 
-    const p = new InstrumentedStaticJsonRpcProvider(
-      'http://example.invalid',
-      1,
-      'p1',
+    const p = new InstrumentedStaticJsonRpcProvider({
+      chainId: 1,
+      url: 'http://example.invalid',
+      providerId: 'p1',
       stats,
-      limiter,
-      10_000,
-      (e) => events.push(e),
-    );
+      onEvent: (e) => events.push(e),
+    });
 
     const res = await p.send('eth_chainId', []);
 
@@ -75,18 +73,15 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
     const stats = new Stats();
     const setCooldownSpy = vi.spyOn(stats, 'setCooldown');
 
-    const limiter = new Semaphore(10);
     const events: RpcEvent[] = [];
 
-    const p = new InstrumentedStaticJsonRpcProvider(
-      'http://example.invalid',
-      1,
-      'p1',
+    const p = new InstrumentedStaticJsonRpcProvider({
+      chainId: 1,
+      url: 'http://example.invalid',
+      providerId: 'p1',
       stats,
-      limiter,
-      10000,
-      (e) => events.push(e),
-    );
+      onEvent: (e) => events.push(e),
+    });
 
     await expect(p.send('eth_blockNumber', [])).rejects.toThrow('rate limit');
 
@@ -119,18 +114,15 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
     const stats = new Stats();
     const setCooldownSpy = vi.spyOn(stats, 'setCooldown');
 
-    const limiter = new Semaphore(10);
     const events: RpcEvent[] = [];
 
-    const p = new InstrumentedStaticJsonRpcProvider(
-      'http://example.invalid',
-      1,
-      'p1',
+    const p = new InstrumentedStaticJsonRpcProvider({
+      chainId: 1,
+      url: 'http://example.invalid',
+      providerId: 'p1',
       stats,
-      limiter,
-      10000,
-      (e) => events.push(e),
-    );
+      onEvent: (e) => events.push(e),
+    });
 
     await expect(
       p.send('eth_getBalance', ['0x0000000000000000000000000000000000000000', 'latest']),
@@ -163,18 +155,16 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
     });
 
     const stats = new Stats();
-    const limiter = new Semaphore(10);
     const events: RpcEvent[] = [];
 
-    const p = new InstrumentedStaticJsonRpcProvider(
-      'http://example.invalid',
-      1,
-      'p1',
+    const p = new InstrumentedStaticJsonRpcProvider({
+      chainId: 1,
+      url: 'http://example.invalid',
+      providerId: 'p1',
       stats,
-      limiter,
-      10000,
-      (e) => events.push(e),
-    );
+      timeout: 10000,
+      onEvent: (e) => events.push(e),
+    });
 
     const promise = p.send('eth_call', [
       { to: '0x0000000000000000000000000000000000000000', data: '0x' },
@@ -226,15 +216,15 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
     const stats = new Stats();
     const setCooldownSpy = vi.spyOn(stats, 'setCooldown');
 
-    const limiter = new Semaphore(10);
-    const p = new InstrumentedStaticJsonRpcProvider(
-      'http://example.invalid',
-      1,
-      'p1',
+    const p = new InstrumentedStaticJsonRpcProvider({
+      chainId: 1,
+      url: 'http://example.invalid',
+      providerId: 'p1',
       stats,
-      limiter,
-      10000,
-    );
+      inFlight: 10,
+      rps: 50,
+      rpsBurst: 50,
+    });
 
     // 40 успешных
     for (let i = 0; i < 40; i++) {
@@ -269,16 +259,16 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
     });
 
     const stats = new Stats();
-    const limiter = new Semaphore(1);
 
-    const p = new InstrumentedStaticJsonRpcProvider(
-      'http://example.invalid',
-      1,
-      'p1',
+    const p = new InstrumentedStaticJsonRpcProvider({
+      chainId: 1,
+      url: 'http://example.invalid',
+      providerId: 'p1',
       stats,
-      limiter,
-      10000,
-    );
+      inFlight: 1,
+      rps: 10,
+      rpsBurst: 10,
+    });
 
     const a = p.send('eth_blockNumber', []);
     await flushMicrotasks();
@@ -299,5 +289,50 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
     // после release из finally второй должен пройти
     await expect(b).resolves.toBe('SECOND');
     expect(baseSend).toHaveBeenCalledTimes(2);
+  });
+
+  it('limits RPS using RpsLimiter: requests wait for rate limit window', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+    const baseSend = vi.spyOn(JsonRpcProvider.prototype, 'send').mockResolvedValue('OK');
+
+    const stats = new Stats();
+
+    const p = new InstrumentedStaticJsonRpcProvider({
+      chainId: 1,
+      url: 'http://example.invalid',
+      providerId: 'p1',
+      stats,
+      inFlight: 10,
+      rps: 2,
+      rpsBurst: 2,
+    });
+
+    // First two requests should go through immediately
+    const p1 = p.send('eth_blockNumber', []);
+    const p2 = p.send('eth_blockNumber', []);
+    // Third request should wait for rate limit window
+    const p3 = p.send('eth_blockNumber', []);
+    const p4 = p.send('eth_blockNumber', []);
+
+    await flushMicrotasks();
+
+    await expect(p1).resolves.toBe('OK');
+    await expect(p2).resolves.toBe('OK');
+
+    expect(baseSend).toHaveBeenCalledTimes(2);
+
+    await flushMicrotasks();
+
+    // Should not have been called yet
+    expect(baseSend).toHaveBeenCalledTimes(2);
+
+    // Advance time by 1000ms to allow next requests
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await expect(p3).resolves.toBe('OK');
+    await expect(p4).resolves.toBe('OK');
+    expect(baseSend).toHaveBeenCalledTimes(4);
   });
 });

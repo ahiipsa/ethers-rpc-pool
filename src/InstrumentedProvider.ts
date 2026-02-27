@@ -9,7 +9,19 @@ import {
   RpcEvent,
   withTimeout,
 } from './utils';
+import { RpsLimiter } from './RpsLimiter';
 
+interface ProviderParams {
+  url: string;
+  chainId: number;
+  providerId: string;
+  stats: Stats;
+  inFlight?: number;
+  timeout?: number;
+  rps?: number;
+  rpsBurst?: number;
+  onEvent?: (e: RpcEvent) => void;
+}
 /**
  * Instrumented StaticJsonRpcProvider.
  * Tracks requests, inFlight count, rate limits, and per-method / per-provider metrics.
@@ -17,24 +29,32 @@ import {
 export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
   readonly providerId: string;
   readonly chainId: number;
+  readonly params: ProviderParams;
 
-  constructor(
-    url: string,
-    chainId: number,
-    providerId: string,
-    private readonly stats: Stats,
-    private readonly limiter: Semaphore,
-    private readonly timeout: number,
-    private readonly onEvent?: (e: RpcEvent) => void,
-  ) {
+  readonly inFlightLimiter: Semaphore;
+  readonly rpsLimiter: RpsLimiter;
+  readonly stats: Stats;
+
+  constructor(params: ProviderParams) {
+    const { url, providerId, chainId } = params;
+
     const network = Network.from(chainId);
     super(url, chainId, { staticNetwork: network });
     this.providerId = providerId;
     this.chainId = chainId;
+    this.params = params;
+
+    const { rps = 10, rpsBurst, inFlight = 1 } = params;
+
+    this.inFlightLimiter = new Semaphore(inFlight);
+    this.rpsLimiter = new RpsLimiter(rps, rpsBurst || rps);
+    this.stats = params.stats;
   }
 
   async send(method: string, params: any): Promise<any> {
-    const release = this.limiter ? await this.limiter.acquire() : undefined;
+    await this.rpsLimiter.take(1);
+
+    const release = this.inFlightLimiter ? await this.inFlightLimiter.acquire() : undefined;
 
     try {
       return await this._sendInstrumented(method, params);
@@ -52,7 +72,7 @@ export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
     this.stats.bumpProviderTotal(this.providerId);
     this.stats.bumpPerMethod(method);
 
-    this.onEvent?.({
+    this.params.onEvent?.({
       type: 'request',
       chainId: this.chainId,
       providerId: this.providerId,
@@ -62,14 +82,14 @@ export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
 
     try {
       const base = super.send(method, params);
-      const res = await withTimeout(base, this.timeout, {
+      const res = await withTimeout(base, this.params.timeout || 10_0000, {
         chainId: this.chainId,
         providerId: this.providerId,
         method,
       });
 
       const endedAt = Date.now();
-      this.onEvent?.({
+      this.params.onEvent?.({
         type: 'response',
         chainId: this.chainId,
         providerId: this.providerId,
@@ -105,7 +125,7 @@ export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
         }
       }
 
-      this.onEvent?.({
+      this.params.onEvent?.({
         type: 'error',
         chainId: this.chainId,
         providerId: this.providerId,

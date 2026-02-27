@@ -4,11 +4,12 @@ import { Endpoint, RpcEvent, shouldFailover } from './utils';
 import { Semaphore } from './Semaphore';
 import { InstrumentedStaticJsonRpcProvider } from './InstrumentedProvider';
 import { Router } from './Router';
+import { RpsLimiter } from './RpsLimiter';
 
 export interface RPCPoolProviderParams {
   chainId: number;
   urls: string[];
-  perUrl: { inFlight: number; timeout?: number };
+  perUrl: { inFlight: number; timeout?: number; rps?: number; rpsBurst?: number };
   retry: { attempts: number };
   hooks?: {
     onEvent(e: RpcEvent): void;
@@ -34,19 +35,22 @@ export class RPCPoolProvider extends JsonRpcProvider {
 
     const endpoints: Endpoint[] = this.params.urls.map((url, i) => {
       const providerId = `rpc#${i + 1}-chainId:${this.params.chainId}-${url}`;
-      const limiter = new Semaphore(this.params.perUrl.inFlight);
 
-      const timeout = this.params.perUrl.timeout ?? 10_000;
+      const { inFlight = 1, rps = 1, rpsBurst, timeout = 10_000 } = this.params.perUrl;
 
-      const provider = new InstrumentedStaticJsonRpcProvider(
+      const limiter = new Semaphore(inFlight);
+
+      const provider = new InstrumentedStaticJsonRpcProvider({
         url,
-        this.params.chainId,
+        chainId: this.params.chainId,
         providerId,
-        this.stats,
-        limiter,
+        stats: this.stats,
+        inFlight,
+        rps,
+        rpsBurst,
         timeout,
-        this.params.hooks?.onEvent,
-      );
+        onEvent: this.params.hooks?.onEvent,
+      });
 
       return { providerId, url, provider, limiter };
     });
