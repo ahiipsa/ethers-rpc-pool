@@ -11,6 +11,12 @@
     "evm",
     "failover"
   ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/ahiipsa/ethers-rpc-pool.git"
@@ -32,7 +38,9 @@
   },
   "type": "module",
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
