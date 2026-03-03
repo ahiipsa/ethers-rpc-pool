@@ -5,6 +5,7 @@ import {
   getHttpStatus,
   getRetryAfterMs,
   isRateLimitError,
+  isServerError,
   isTimeoutError,
   RpcEvent,
   withTimeout,
@@ -34,6 +35,8 @@ export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
   readonly inFlightLimiter: Semaphore;
   readonly rpsLimiter: RpsLimiter;
   readonly stats: Stats;
+
+  private lastCooldownMs: number = 0;
 
   constructor(params: ProviderParams) {
     const { url, providerId, chainId } = params;
@@ -104,6 +107,8 @@ export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
         });
       }
 
+      this.lastCooldownMs = 0;
+
       return res;
     } catch (e: any) {
       const endedAt = Date.now();
@@ -116,7 +121,7 @@ export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
       }
 
       const isTimeout = isTimeoutError(e);
-      if (isTimeout) {
+      if (isTimeout && !rl) {
         this.stats.bumpTimeoutPerProvider(this.providerId);
 
         const n = this.stats.snapshot().perProviderTotal[this.providerId] || 0;
@@ -124,10 +129,19 @@ export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
 
         // thresholds: do not ban on a single timeout, only after enough data
         if (n >= 50 && ratio >= 0.2) {
-          const cooldownMs = ratio >= 0.5 ? 600 * 1000 : 60_000;
+          const cooldownMs = ratio >= 0.5 ? 600_000 : 60_000;
           const raMs = getRetryAfterMs(e) ?? cooldownMs;
+          this.lastCooldownMs = raMs;
           this.stats.setCooldown(this.providerId, raMs + Math.floor(Math.random() * 1000));
         }
+      }
+
+      const isError = isServerError(e);
+      if (isError && !rl && !isTimeout) {
+        this.stats.bumpServerErrorPerProvider(this.providerId);
+        const cooldownMs = (this.lastCooldownMs * 2 || 10_000) + Math.floor(Math.random() * 1000);
+        this.lastCooldownMs = cooldownMs;
+        this.stats.setCooldown(this.providerId, cooldownMs);
       }
 
       for (const p of payloads) {

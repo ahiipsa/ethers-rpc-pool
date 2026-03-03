@@ -55,7 +55,7 @@ export function isRateLimitError(e: any): boolean {
 
   const msg = String(e?.message || e);
   if (/error code:\s*1015/i.test(msg)) return true; // Cloudflare
-  return /rate limit|payment required|too many requests|429|quota|throttl/i.test(msg);
+  return /rate limit|too many requests|429|quota|throttl/i.test(msg);
 }
 
 export function isServerError(e: any): boolean {

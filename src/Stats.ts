@@ -9,6 +9,7 @@ export interface RpcStatsSnapshot {
   perProviderTotal: Record<string, number>;
   providerCooldownUntil: Record<string, number>;
   perProviderInFlight: Record<string, number>;
+  perProviderError: Record<string, number>;
 }
 
 export class Stats {
@@ -24,6 +25,7 @@ export class Stats {
   private _perProviderTotal: Record<string, number> = {};
   private _perProviderTimeout: Record<string, number> = {};
   private _perProviderRateLimited: Record<string, number> = {};
+  private _perProviderError: Record<string, number> = {};
 
   private _providerCooldownUntil: Record<string, number> = {};
 
@@ -83,6 +85,9 @@ export class Stats {
     this._bumpTotal();
     this._perProviderTotal[id] = (this._perProviderTotal[id] || 0) + 1;
   }
+  bumpServerErrorPerProvider(id: string) {
+    this._bump(this._perProviderError, id);
+  }
 
   timeoutRatio(id: string) {
     const t = this._perProviderTimeout[id] || 0;
@@ -108,6 +113,7 @@ export class Stats {
       perProviderInFlight: { ...this._perProviderInFlight },
       perProviderRateLimited: { ...this._perProviderRateLimited },
       perProviderTimeout: { ...this._perProviderTimeout },
+      perProviderError: { ...this._perProviderError },
       perProviderTotal: { ...this._perProviderTotal },
       providerCooldownUntil: { ...this._providerCooldownUntil },
     };
