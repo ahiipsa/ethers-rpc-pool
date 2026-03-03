@@ -1,4 +1,4 @@
-import { JsonRpcProvider, Network } from 'ethers';
+import { JsonRpcProvider, Network, JsonRpcPayload } from 'ethers';
 import { Semaphore } from './Semaphore';
 import { Stats } from './Stats';
 import {
@@ -51,13 +51,13 @@ export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
     this.stats = params.stats;
   }
 
-  async send(method: string, params: any): Promise<any> {
+  override async _send(payload: JsonRpcPayload | JsonRpcPayload[]): Promise<any> {
     await this.rpsLimiter.take(1);
 
     const release = this.inFlightLimiter ? await this.inFlightLimiter.acquire() : undefined;
 
     try {
-      return await this._sendInstrumented(method, params);
+      return await this._sendInstrumented(payload);
     } finally {
       release?.();
     }
@@ -65,39 +65,44 @@ export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
 
   // ethers v5 calls send(method, params)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async _sendInstrumented(method: string, params: any): Promise<any> {
+  private async _sendInstrumented(payload: JsonRpcPayload | JsonRpcPayload[]): Promise<any> {
     const startedAt = Date.now();
+    const payloads = Array.isArray(payload) ? payload : [payload];
 
     this.stats.bumpInFlightPerProvider(this.providerId);
     this.stats.bumpProviderTotal(this.providerId);
-    this.stats.bumpPerMethod(method);
 
-    this.params.onEvent?.({
-      type: 'request',
-      chainId: this.chainId,
-      providerId: this.providerId,
-      method,
-      startedAt,
-    });
-
-    try {
-      const base = super.send(method, params);
-      const res = await withTimeout(base, this.params.timeout || 10_0000, {
+    for (const p of payloads) {
+      this.stats.bumpPerMethod(p.method);
+      this.params.onEvent?.({
+        type: 'request',
         chainId: this.chainId,
         providerId: this.providerId,
-        method,
+        method: p.method,
+        startedAt,
+      });
+    }
+
+    try {
+      const base = super._send(payload);
+      const res = await withTimeout(base, this.params.timeout || 10_000, {
+        chainId: this.chainId,
+        providerId: this.providerId,
       });
 
       const endedAt = Date.now();
-      this.params.onEvent?.({
-        type: 'response',
-        chainId: this.chainId,
-        providerId: this.providerId,
-        method,
-        startedAt,
-        endedAt,
-        ms: endedAt - startedAt,
-      });
+
+      for (const p of payloads) {
+        this.params.onEvent?.({
+          type: 'response',
+          chainId: this.chainId,
+          providerId: this.providerId,
+          method: p.method,
+          startedAt,
+          endedAt,
+          ms: endedAt - startedAt,
+        });
+      }
 
       return res;
     } catch (e: any) {
@@ -125,20 +130,22 @@ export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
         }
       }
 
-      this.params.onEvent?.({
-        type: 'error',
-        chainId: this.chainId,
-        providerId: this.providerId,
-        method,
-        startedAt,
-        endedAt,
-        ms: endedAt - startedAt,
-        isRateLimit: rl,
-        isTimeout: isTimeout,
-        status: getHttpStatus(e),
-        code: e?.code,
-        message: String(e?.message || e),
-      });
+      for (const p of payloads) {
+        this.params.onEvent?.({
+          type: 'error',
+          chainId: this.chainId,
+          providerId: this.providerId,
+          method: p.method,
+          startedAt,
+          endedAt,
+          ms: endedAt - startedAt,
+          isRateLimit: rl,
+          isTimeout: isTimeout,
+          status: getHttpStatus(e),
+          code: e?.code,
+          message: String(e?.message || e),
+        });
+      }
 
       throw e;
     } finally {

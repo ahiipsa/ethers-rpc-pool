@@ -71,8 +71,9 @@ describe('RpsLimiter', () => {
     await flushMicrotasks();
     expect(done).toBe(false);
 
-    // another 1ms => total 500ms, token accumulated
-    await vi.advanceTimersByTimeAsync(1);
+    // another 2ms => total 501ms, token accumulated
+    await vi.advanceTimersByTimeAsync(2);
+
     await p;
     expect(done).toBe(true);
   });

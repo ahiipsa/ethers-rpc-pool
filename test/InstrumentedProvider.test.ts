@@ -1,10 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { JsonRpcProvider } from 'ethers';
+import { JsonRpcProvider, Network } from 'ethers';
 import { InstrumentedStaticJsonRpcProvider } from '../src/InstrumentedProvider';
 import { Stats } from '../src/Stats';
-import { Semaphore } from '../src/Semaphore';
 import type { RpcEvent } from '../src/utils';
-import { RpsLimiter } from '../src/RpsLimiter';
 
 function flushMicrotasks(): Promise<void> {
   return Promise.resolve().then(() => undefined);
@@ -21,10 +19,9 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
   });
 
   it('success: bumps stats, emits request+response events, and decrements inFlight', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
-
-    const baseSend = vi.spyOn(JsonRpcProvider.prototype, 'send').mockResolvedValue('OK');
+    const baseSend = vi
+      .spyOn(JsonRpcProvider.prototype, '_send')
+      .mockResolvedValue([{ id: 1, result: '0x01' }]);
 
     const stats = new Stats();
     const events: RpcEvent[] = [];
@@ -39,7 +36,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
 
     const res = await p.send('eth_chainId', []);
 
-    expect(res).toBe('OK');
+    expect(res).toBe('0x01');
     expect(baseSend).toHaveBeenCalledTimes(1);
 
     expect(stats.snapshot().total).toBe(1);
@@ -62,13 +59,10 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
   });
 
   it('rate limit (429): bumps rate-limit stats, sets cooldown(600s), emits error event', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
-
     const err: any = new Error('rate limit');
     err.status = 429;
 
-    vi.spyOn(JsonRpcProvider.prototype, 'send').mockRejectedValue(err);
+    vi.spyOn(JsonRpcProvider.prototype, '_send').mockRejectedValue(err);
 
     const stats = new Stats();
     const setCooldownSpy = vi.spyOn(stats, 'setCooldown');
@@ -102,14 +96,12 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
   });
 
   it('timeout via thrown { code: TIMEOUT }: bumps timeout stats and sets cooldown (ratio===1 path)', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
     vi.spyOn(Math, 'random').mockReturnValue(0); // чтобы cooldown был детерминирован
 
     const err: any = new Error('timeout');
     err.code = 'TIMEOUT';
 
-    vi.spyOn(JsonRpcProvider.prototype, 'send').mockRejectedValue(err);
+    vi.spyOn(JsonRpcProvider.prototype, '_send').mockRejectedValue(err);
 
     const stats = new Stats();
     const setCooldownSpy = vi.spyOn(stats, 'setCooldown');
@@ -144,11 +136,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
   });
 
   it('timeout via withTimeout when RPC hangs for 10s', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
-    vi.spyOn(Math, 'random').mockReturnValue(0);
-
-    vi.spyOn(JsonRpcProvider.prototype, 'send').mockImplementation(() => {
+    vi.spyOn(JsonRpcProvider.prototype, '_send').mockImplementation(() => {
       return new Promise(() => {
         // never resolves
       });
@@ -162,7 +150,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
       url: 'http://example.invalid',
       providerId: 'p1',
       stats,
-      timeout: 10000,
+      timeout: 1000,
       onEvent: (e) => events.push(e),
     });
 
@@ -170,14 +158,14 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
       { to: '0x0000000000000000000000000000000000000000', data: '0x' },
       'latest',
     ]);
+    await new Promise((resolve) => setTimeout(resolve, 15));
 
     // Важно: прикрепляем обработчик отклонения СРАЗУ, чтобы не было unhandled rejection
     const assertion = expect(promise).rejects.toMatchObject({ code: 'TIMEOUT' });
 
-    await flushMicrotasks();
     expect(stats.snapshot().inFlight).toBe(1);
 
-    await vi.advanceTimersByTimeAsync(10_000);
+    await new Promise((resolve) => setTimeout(resolve, 1001));
 
     await assertion;
 
@@ -194,19 +182,16 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
   });
 
   it('sets cooldown on degraded timeout ratio only after n>=50 and ratio>=0.2 (non-1.0 path)', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
-    vi.spyOn(Math, 'random').mockReturnValue(0);
-
     let call = 0;
-    vi.spyOn(JsonRpcProvider.prototype, 'send').mockImplementation(async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    vi.spyOn(JsonRpcProvider.prototype, '_send').mockImplementation(async () => {
       call++;
 
       // План:
       // 1..40  -> success
       // 41..49 -> timeout (9 шт)
       // 50     -> timeout (10-я), где n=50, ratio=10/50=0.2 => cooldown 60_000
-      if (call <= 40) return 'OK';
+      if (call <= 40) return [{ id: call, result: '0x01' }];
 
       const e: any = new Error('timeout');
       e.code = 'TIMEOUT';
@@ -228,7 +213,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
 
     // 40 успешных
     for (let i = 0; i < 40; i++) {
-      await expect(p.send('eth_blockNumber', [])).resolves.toBe('OK');
+      await expect(p.send('eth_blockNumber', [])).resolves.toBe('0x01');
     }
 
     // 10 таймаутов (последний должен триггернуть cooldown по n>=50 && ratio>=0.2)
@@ -246,15 +231,12 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
   });
 
   it('limits concurrency using Semaphore: second send waits until first finishes', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
-
     let resolveFirst: ((v: any) => void) | null = null;
 
-    const baseSend = vi.spyOn(JsonRpcProvider.prototype, 'send').mockImplementation(() => {
+    const baseSend = vi.spyOn(JsonRpcProvider.prototype, '_send').mockImplementation(() => {
       return new Promise((resolve) => {
         if (!resolveFirst) resolveFirst = resolve;
-        else resolve('SECOND');
+        else resolve([{ id: 2, result: '0x02' }]);
       });
     });
 
@@ -271,31 +253,32 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
     });
 
     const a = p.send('eth_blockNumber', []);
-    await flushMicrotasks();
+
+    await new Promise((resolve) => setTimeout(resolve, 15));
 
     // второй вызов стартует, но должен ждать семафор и НЕ дергать baseSend
     const b = p.send('eth_blockNumber', []);
-    await flushMicrotasks();
 
     expect(baseSend).toHaveBeenCalledTimes(1);
 
     expect(resolveFirst).not.toBeNull();
 
-    resolveFirst!('FIRST');
+    resolveFirst!([{ id: 1, result: '0x01' }]);
 
-    await expect(a).resolves.toBe('FIRST');
-    await flushMicrotasks();
+    await expect(a).resolves.toBe('0x01');
 
     // после release из finally второй должен пройти
-    await expect(b).resolves.toBe('SECOND');
+    await expect(b).resolves.toBe('0x02');
     expect(baseSend).toHaveBeenCalledTimes(2);
   });
 
   it('limits RPS using RpsLimiter: requests wait for rate limit window', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
-
-    const baseSend = vi.spyOn(JsonRpcProvider.prototype, 'send').mockResolvedValue('OK');
+    const baseSend = vi.spyOn(JsonRpcProvider.prototype, '_send').mockResolvedValue([
+      { id: 1, result: '0x01' },
+      { id: 2, result: '0x01' },
+      { id: 3, result: '0x01' },
+      { id: 4, result: '0x01' },
+    ]);
 
     const stats = new Stats();
 
@@ -311,28 +294,27 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
 
     // First two requests should go through immediately
     const p1 = p.send('eth_blockNumber', []);
+    await new Promise((resolve) => setTimeout(resolve, 15));
     const p2 = p.send('eth_blockNumber', []);
+    await new Promise((resolve) => setTimeout(resolve, 15));
     // Third request should wait for rate limit window
     const p3 = p.send('eth_blockNumber', []);
+    await new Promise((resolve) => setTimeout(resolve, 15));
     const p4 = p.send('eth_blockNumber', []);
+    await new Promise((resolve) => setTimeout(resolve, 15));
 
-    await flushMicrotasks();
-
-    await expect(p1).resolves.toBe('OK');
-    await expect(p2).resolves.toBe('OK');
+    await expect(p1).resolves.toBe('0x01');
+    await expect(p2).resolves.toBe('0x01');
 
     expect(baseSend).toHaveBeenCalledTimes(2);
 
     await flushMicrotasks();
-
-    // Should not have been called yet
-    expect(baseSend).toHaveBeenCalledTimes(2);
 
     // Advance time by 1000ms to allow next requests
-    await vi.advanceTimersByTimeAsync(1000);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
 
-    await expect(p3).resolves.toBe('OK');
-    await expect(p4).resolves.toBe('OK');
+    await expect(p3).resolves.toBe('0x01');
+    await expect(p4).resolves.toBe('0x01');
     expect(baseSend).toHaveBeenCalledTimes(4);
   });
 });

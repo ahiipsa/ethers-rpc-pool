@@ -1,10 +1,8 @@
 import { JsonRpcProvider, Network } from 'ethers';
 import { Stats } from './Stats';
 import { Endpoint, RpcEvent, shouldFailover } from './utils';
-import { Semaphore } from './Semaphore';
 import { InstrumentedStaticJsonRpcProvider } from './InstrumentedProvider';
 import { Router } from './Router';
-import { RpsLimiter } from './RpsLimiter';
 
 export interface RPCPoolProviderParams {
   chainId: number;
@@ -38,8 +36,6 @@ export class RPCPoolProvider extends JsonRpcProvider {
 
       const { inFlight = 1, rps = 1, rpsBurst, timeout = 10_000 } = this.params.perUrl;
 
-      const limiter = new Semaphore(inFlight);
-
       const provider = new InstrumentedStaticJsonRpcProvider({
         url,
         chainId: this.params.chainId,
@@ -52,7 +48,7 @@ export class RPCPoolProvider extends JsonRpcProvider {
         onEvent: this.params.hooks?.onEvent,
       });
 
-      return { providerId, url, provider, limiter };
+      return { providerId, url, provider };
     });
 
     this.router = new Router(endpoints, this.stats);

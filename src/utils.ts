@@ -1,12 +1,9 @@
-import { Semaphore } from './Semaphore';
 import { InstrumentedStaticJsonRpcProvider } from './InstrumentedProvider';
-import { FetchResponse } from 'ethers';
 
 export interface Endpoint {
   providerId: string;
   url: string;
   provider: InstrumentedStaticJsonRpcProvider;
-  limiter: Semaphore;
 }
 
 export type RpcEvent =
@@ -59,6 +56,11 @@ export function isRateLimitError(e: any): boolean {
   const msg = String(e?.message || e);
   if (/error code:\s*1015/i.test(msg)) return true; // Cloudflare
   return /rate limit|payment required|too many requests|429|quota|throttl/i.test(msg);
+}
+
+export function isServerError(e: any): boolean {
+  const status = getHttpStatus(e);
+  return status !== undefined && status >= 500;
 }
 
 export function getRetryAfterMs(e: any): number | null {
@@ -116,7 +118,8 @@ export function withTimeout<T>(
 export function shouldFailover(e: any): boolean {
   const to = isTimeoutError(e);
   const rl = isRateLimitError(e);
+  const se = isServerError(e);
 
   // failover on timeouts and rate limits, but not on logical errors (e.g. invalid params)
-  return to || rl;
+  return to || rl || se;
 }

@@ -18,7 +18,6 @@ function mkEndpoint(
     provider: {
       send: vi.fn(sendImpl),
     } as any,
-    limiter: {} as any,
   };
 }
 
@@ -40,7 +39,9 @@ describe('RPCPoolProvider', () => {
       retry: { attempts: 2 },
     });
 
-    const baseSend = vi.spyOn(JsonRpcProvider.prototype, 'send').mockResolvedValue('OK');
+    const baseSend = vi
+      .spyOn(JsonRpcProvider.prototype, '_send')
+      .mockResolvedValue([{ id: 1, result: 'OK' }]);
 
     const pickSpy = vi.spyOn(pool.router, 'pick');
     const sizeSpy = vi.spyOn(pool.router, 'size');
@@ -203,11 +204,10 @@ describe('RPCPoolProvider', () => {
   });
 
   it('send(): respects RPS limit by delaying requests when rate limit is reached', async () => {
-    vi.useFakeTimers();
-    const startTime = Date.now();
-    vi.setSystemTime(startTime);
-
-    const baseSend = vi.spyOn(JsonRpcProvider.prototype, 'send').mockResolvedValue('OK');
+    const baseSend = vi.spyOn(JsonRpcProvider.prototype, '_send').mockResolvedValue([
+      { id: 1, result: 'OK' },
+      { id: 2, result: 'OK' },
+    ]);
 
     const pool = new RPCPoolProvider({
       chainId: 1,
@@ -218,22 +218,19 @@ describe('RPCPoolProvider', () => {
 
     // The first request should go through immediately
     const p1 = pool.send('eth_blockNumber', []);
+    await new Promise((resolve) => setTimeout(resolve, 15));
     // Second request should wait for rate limit window
     const p2 = pool.send('eth_blockNumber', []);
-
-    await flushMicrotasks();
 
     await expect(p1).resolves.toBe('OK');
 
     expect(baseSend).toHaveBeenCalledTimes(1);
 
-    await flushMicrotasks();
-
     // Should not have been called yet
     expect(baseSend).toHaveBeenCalledTimes(1);
 
     // Advance time by 1000ms to allow next requests
-    await vi.advanceTimersByTimeAsync(1000);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
 
     await expect(p2).resolves.toBe('OK');
     expect(baseSend).toHaveBeenCalledTimes(2);

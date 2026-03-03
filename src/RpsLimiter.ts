@@ -62,7 +62,7 @@ export class RpsLimiter {
       // Wait in chunks (not all waitMs at once), to:
       // - not sleep too long if time/state changed
       // - be more resilient to timer drift
-      await new Promise((r) => setTimeout(r, Math.min(waitMs, 250)));
+      await new Promise((r) => setTimeout(r, Math.min(waitMs, 50)));
     }
   }
 }

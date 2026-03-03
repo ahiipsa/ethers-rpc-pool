@@ -8,7 +8,6 @@ function ep(id: string): Endpoint {
     providerId: id,
     url: `http://example.invalid/${id}`,
     provider: {} as any,
-    limiter: {} as any,
   };
 }
 
