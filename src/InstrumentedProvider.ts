@@ -1,4 +1,4 @@
-import { JsonRpcProvider, Network, JsonRpcPayload } from 'ethers';
+import { JsonRpcProvider, Network, JsonRpcPayload, FetchRequest } from 'ethers';
 import { Semaphore } from './Semaphore';
 import { Stats } from './Stats';
 import {
@@ -35,6 +35,7 @@ export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
   readonly inFlightLimiter: Semaphore;
   readonly rpsLimiter: RpsLimiter;
   readonly stats: Stats;
+  readonly fetchRequest: FetchRequest;
 
   private lastCooldownMs: number = 0;
 
@@ -42,7 +43,12 @@ export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
     const { url, providerId, chainId } = params;
 
     const network = Network.from(chainId);
-    super(url, chainId, { staticNetwork: network });
+    const fetchRequest = new FetchRequest(url);
+
+    fetchRequest.timeout = params.timeout || 10_000;
+
+    super(fetchRequest, chainId, { staticNetwork: network });
+    this.fetchRequest = fetchRequest;
     this.providerId = providerId;
     this.chainId = chainId;
     this.params = params;
