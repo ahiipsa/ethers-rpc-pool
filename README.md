@@ -1,4 +1,4 @@
-![npm](https://img.shields.io/npm/v/ethers-rpc-pool)
+[![npm (tag)](https://img.shields.io/npm/v/ethers-rpc-pool)](https://www.npmjs.com/package/ethers-rpc-pool)
 ![license](https://img.shields.io/npm/l/ethers-rpc-pool)
 
 # ethers-rpc-pool
