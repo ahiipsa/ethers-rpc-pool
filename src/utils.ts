@@ -86,35 +86,6 @@ export function isTimeoutError(e: any): boolean {
   return /timeout|timed out|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED|504 Gateway/i.test(msg);
 }
 
-/**
- * Wraps a promise with a timeout (useful when an RPC hangs without emitting TIMEOUT).
- * Important: this does not cancel the network request, but you get a controlled error
- * and FallbackProvider can switch to another RPC.
- */
-export function withTimeout<T>(
-  p: Promise<T>,
-  ms: number,
-  meta?: { chainId?: number; providerId?: string; method?: string },
-): Promise<T> {
-  let t: NodeJS.Timeout | undefined;
-
-  const timeout = new Promise<T>((_, reject) => {
-    t = setTimeout(() => {
-      const err: any = new Error(
-        `RPC timeout after ${ms}ms` +
-          (meta?.method ? ` method=${meta.method}` : '') +
-          (meta?.providerId ? ` provider=${meta.providerId}` : '') +
-          (meta?.chainId != null ? ` chainId=${meta.chainId}` : ''),
-      );
-      err.code = 'TIMEOUT';
-      err.timeout = ms;
-      reject(err);
-    }, ms);
-  });
-
-  return Promise.race([p, timeout]).finally(() => t && clearTimeout(t));
-}
-
 export function shouldFailover(e: any): boolean {
   const to = isTimeoutError(e);
   const rl = isRateLimitError(e);

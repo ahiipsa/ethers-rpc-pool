@@ -8,7 +8,6 @@ import {
   isServerError,
   isTimeoutError,
   RpcEvent,
-  withTimeout,
 } from './utils';
 import { RpsLimiter } from './RpsLimiter';
 
@@ -47,7 +46,7 @@ export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
 
     fetchRequest.timeout = params.timeout || 10_000;
 
-    super(fetchRequest, chainId, { staticNetwork: network });
+    super(fetchRequest, chainId, { staticNetwork: network, batchMaxCount: 1 });
     this.fetchRequest = fetchRequest;
     this.providerId = providerId;
     this.chainId = chainId;
@@ -93,11 +92,7 @@ export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
     }
 
     try {
-      const base = super._send(payload);
-      const res = await withTimeout(base, this.params.timeout || 10_000, {
-        chainId: this.chainId,
-        providerId: this.providerId,
-      });
+      const res = await super._send(payload);
 
       const endedAt = Date.now();
 

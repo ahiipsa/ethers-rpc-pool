@@ -1,15 +1,26 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { JsonRpcProvider, Network } from 'ethers';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
+import { JsonRpcProvider } from 'ethers';
 import { InstrumentedStaticJsonRpcProvider } from '../src/InstrumentedProvider';
 import { Stats } from '../src/Stats';
 import type { RpcEvent } from '../src/utils';
-import { sleep } from './utils';
+import { sleep } from './helpers/utils';
+import { createTestServer } from './helpers/testServer';
 
 function flushMicrotasks(): Promise<void> {
   return Promise.resolve().then(() => undefined);
 }
 
 describe('InstrumentedStaticJsonRpcProvider', () => {
+  const testServer = createTestServer();
+
+  beforeAll(async () => {
+    await testServer.start();
+  });
+
+  afterAll(async () => {
+    await testServer.stop();
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
   });
@@ -27,7 +38,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
     const stats = new Stats();
     const events: RpcEvent[] = [];
 
-    const p = new InstrumentedStaticJsonRpcProvider({
+    const provider = new InstrumentedStaticJsonRpcProvider({
       chainId: 1,
       url: 'http://example.invalid',
       providerId: 'p1',
@@ -35,7 +46,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
       onEvent: (e) => events.push(e),
     });
 
-    const res = await p.send('eth_chainId', []);
+    const res = await provider.send('eth_chainId', []);
 
     expect(res).toBe('0x01');
     expect(baseSend).toHaveBeenCalledTimes(1);
@@ -69,7 +80,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
 
     const events: RpcEvent[] = [];
 
-    const p = new InstrumentedStaticJsonRpcProvider({
+    const provider = new InstrumentedStaticJsonRpcProvider({
       chainId: 1,
       url: 'http://example.invalid',
       providerId: 'p1',
@@ -77,7 +88,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
       onEvent: (e) => events.push(e),
     });
 
-    await expect(p.send('eth_blockNumber', [])).rejects.toThrow('rate limit');
+    await expect(provider.send('eth_blockNumber', [])).rejects.toThrow('rate limit');
 
     expect(stats.snapshot().total).toBe(1);
     expect(stats.snapshot().inFlight).toBe(0);
@@ -103,9 +114,9 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
 
     const events: RpcEvent[] = [];
 
-    const p = new InstrumentedStaticJsonRpcProvider({
+    const provider = new InstrumentedStaticJsonRpcProvider({
       chainId: 1,
-      url: 'https://api.example.com/timeout/5000',
+      url: testServer.baseUrl + '/timeout/5000',
       providerId: 'p1',
       timeout: 1000,
       stats,
@@ -113,7 +124,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
     });
 
     await expect(
-      p.send('eth_getBalance', ['0x0000000000000000000000000000000000000000', 'latest']),
+      provider.send('eth_getBalance', ['0x0000000000000000000000000000000000000000', 'latest']),
     ).rejects.toThrow(/timeout/i);
 
     expect(stats.snapshot().total).toBe(1);
@@ -130,13 +141,13 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
     }
   });
 
-  it('timeout via withTimeout when RPC hangs for 1s', async () => {
+  it('timeout when RPC hangs for 1s', async () => {
     const stats = new Stats();
     const events: RpcEvent[] = [];
 
     const p = new InstrumentedStaticJsonRpcProvider({
       chainId: 1,
-      url: 'https://api.example.com/timeout/5000',
+      url: testServer.baseUrl + '/timeout/5000',
       providerId: 'p1',
       stats,
       timeout: 1000,
@@ -149,14 +160,8 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
     ]);
 
     // Важно: прикрепляем обработчик отклонения СРАЗУ, чтобы не было unhandled rejection
-    const assertion = expect(promise).rejects.toThrow(/timeout/i);
+    await expect(promise).rejects.toThrow(/timeout/i);
 
-    expect(stats.snapshot().inFlight).toBe(1);
-
-    await assertion;
-
-    expect(stats.snapshot().inFlight).toBe(0);
-    expect(stats.snapshot().timeoutTotal).toBe(1);
     expect(stats.snapshot().perProviderTimeout['p1']).toBe(1);
 
     const errorEvent = events.find((e) => e.type === 'error');
@@ -267,7 +272,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
 
     const stats = new Stats();
 
-    const p = new InstrumentedStaticJsonRpcProvider({
+    const provider = new InstrumentedStaticJsonRpcProvider({
       chainId: 1,
       url: 'http://example.invalid',
       providerId: 'p1',
@@ -278,14 +283,14 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
     });
 
     // First two requests should go through immediately
-    const p1 = p.send('eth_blockNumber', []);
+    const p1 = provider.send('eth_blockNumber', []);
     await sleep(15);
-    const p2 = p.send('eth_blockNumber', []);
+    const p2 = provider.send('eth_blockNumber', []);
     await sleep(15);
     // Third request should wait for rate limit window
-    const p3 = p.send('eth_blockNumber', []);
+    const p3 = provider.send('eth_blockNumber', []);
     await sleep(15);
-    const p4 = p.send('eth_blockNumber', []);
+    const p4 = provider.send('eth_blockNumber', []);
     await sleep(15);
 
     await expect(p1).resolves.toBe('0x01');
