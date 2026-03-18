@@ -67,8 +67,14 @@ import { RPCPoolProvider } from 'ethers-rpc-pool';
 
 const poolProvider = new RPCPoolProvider({
   chainId: 1,
-  urls: ['http://rpc1.invalid', 'http://rpc2.invalid'],
-  perUrl: { inFlight: 1, timeout: 3000, rps: 2, rpsBurst: 5 },
+  rpc: [
+    { url: 'http://rpc1.example' },
+    { url: 'http://rpc2.example' },
+    { url: 'http://rpc3.example' },
+    { url: 'http://rpc4.example' },
+    { url: 'http://rpc5.example' },
+  ],
+  defaultRpcOptions: { inFlight: 1, timeout: 3000, rps: 2, rpsBurst: 5 },
   retry: { attempts: 2 },
 });
 
@@ -86,8 +92,18 @@ const balance = await poolProvider.getBalance('0x...');
 
 ```ts
 interface RPCPoolProviderParams {
-  chainId: number;
-  urls: string[];
+  network: number;
+  rpc: {
+    url: string;
+    timeout?: number;
+    rps?: number;
+    rpsBurst?: number;
+  }[];
+  defaultRpcOptions?: {
+    timeout?: number;
+    rps?: number;
+    rpsBurst?: number;
+  };
   perUrl: {
     inFlight: number;
   };
@@ -102,16 +118,16 @@ interface RPCPoolProviderParams {
 
 ### Options Explained
 
-| Option            | Description                                                                                                                          |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `chainId`         | Target chain ID                                                                                                                      |
-| `urls`            | List of RPC endpoints                                                                                                                |
-| `perUrl.inFlight` | Max concurrent requests per endpoint                                                                                                 |
-| `perUrl.timeout`  | Timeout in ms for each request to this URL, default 10s                                                                              |
-| `perUrl.rps`      | Maximum number of requests per second allowed for a single RPC endpoint. Enforced using a token bucket rate limiter.                 |
-| `perUrl.rpsBurst` | aximum burst capacity for the rate limiter. Allows short spikes above the sustained rate by accumulating tokens during idle periods. |
-| `retry.attempts`  | Maximum number of unique endpoints to try                                                                                            |
-| `hooks.onEvent`   | Optional instrumentation hook                                                                                                        |
+| Option                       | Description                                                                                                                           |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `network`                    | Target chain ID                                                                                                                       |
+| `rpc`                        | List of RPC endpoints                                                                                                                 |
+| `defaultRpcOptions.inFlight` | Max concurrent requests per endpoint                                                                                                  |
+| `defaultRpcOptions.timeout`  | Timeout in ms for each request to this URL, default 10s                                                                               |
+| `defaultRpcOptions.rps`      | Maximum number of requests per second allowed for a single RPC endpoint. Enforced using a token bucket rate limiter.                  |
+| `defaultRpcOptions.rpsBurst` | Maximum burst capacity for the rate limiter. Allows short spikes above the sustained rate by accumulating tokens during idle periods. |
+| `retry.attempts`             | Maximum number of unique endpoints to try                                                                                             |
+| `hooks.onEvent`              | Optional instrumentation hook                                                                                                         |
 
 ---
 
@@ -126,9 +142,7 @@ Requests are routed through an internal `Router`, which selects an available end
 Each endpoint has its own semaphore limiter:
 
 ```ts
-perUrl: {
-  inFlight: number;
-}
+inFlight: number;
 ```
 
 This prevents:

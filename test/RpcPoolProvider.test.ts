@@ -14,7 +14,7 @@ function mkEndpoint(
 ): Endpoint {
   return {
     providerId,
-    url: `http://example.invalid/${providerId}`,
+    url: `http://rpc.example/${providerId}`,
     provider: {
       send: vi.fn(sendImpl),
     } as any,
@@ -33,15 +33,11 @@ describe('RPCPoolProvider', () => {
 
   it('send(): success on first picked endpoint (no retries)', async () => {
     const pool = new RPCPoolProvider({
-      chainId: 1,
-      urls: ['http://rpc1.invalid', 'http://rpc2.invalid'],
-      perUrl: { inFlight: 1 },
+      network: 1,
+      rpc: [{ url: 'http://rpc1.example' }, { url: 'http://rpc2.example' }],
+      defaultRpcOptions: { inFlight: 1 },
       retry: { attempts: 2 },
     });
-
-    const baseSend = vi
-      .spyOn(JsonRpcProvider.prototype, '_send')
-      .mockResolvedValue([{ id: 1, result: 'OK' }]);
 
     const pickSpy = vi.spyOn(pool.router, 'pick');
     const sizeSpy = vi.spyOn(pool.router, 'size');
@@ -68,9 +64,9 @@ describe('RPCPoolProvider', () => {
     const ep2 = mkEndpoint('p2', async () => 'OK2');
 
     const pool = new RPCPoolProvider({
-      chainId: 1,
-      urls: ['http://rpc1.invalid', 'http://rpc2.invalid'],
-      perUrl: { inFlight: 1 },
+      network: 1,
+      rpc: [{ url: 'http://rpc1.example' }, { url: 'http://rpc2.example' }],
+      defaultRpcOptions: { inFlight: 1 },
       retry: { attempts: 2 },
     });
 
@@ -104,9 +100,9 @@ describe('RPCPoolProvider', () => {
     vi.spyOn(Router.prototype, 'size').mockReturnValue(2);
 
     const pool = new RPCPoolProvider({
-      chainId: 1,
-      urls: ['http://rpc1.invalid', 'http://rpc2.invalid'],
-      perUrl: { inFlight: 1 },
+      network: 1,
+      rpc: [{ url: 'http://rpc1.example' }, { url: 'http://rpc2.example' }],
+      defaultRpcOptions: { inFlight: 1 },
       retry: { attempts: 2 },
     });
 
@@ -133,9 +129,9 @@ describe('RPCPoolProvider', () => {
     const ep2 = mkEndpoint('p2', async () => 'OK');
 
     const pool = new RPCPoolProvider({
-      chainId: 1,
-      urls: ['http://rpc1.invalid', 'http://rpc2.invalid'],
-      perUrl: { inFlight: 1 },
+      network: 1,
+      rpc: [{ url: 'http://rpc1.example' }, { url: 'http://rpc2.example' }],
+      defaultRpcOptions: { inFlight: 1 },
       retry: { attempts: 2 },
     });
 
@@ -170,9 +166,9 @@ describe('RPCPoolProvider', () => {
     const ep2 = mkEndpoint('p2', async () => 'SHOULD_NOT_BE_USED');
 
     const pool = new RPCPoolProvider({
-      chainId: 1,
-      urls: ['http://rpc1.invalid', 'http://rpc2.invalid'],
-      perUrl: { inFlight: 1 },
+      network: 1,
+      rpc: [{ url: 'http://rpc1.example' }, { url: 'http://rpc2.example' }],
+      defaultRpcOptions: { inFlight: 1 },
       retry: { attempts: 1 },
     });
 
@@ -188,9 +184,9 @@ describe('RPCPoolProvider', () => {
 
   it('send(): when router.size()=0, throws "No RPC available" without calling pick()', async () => {
     const pool = new RPCPoolProvider({
-      chainId: 1,
-      urls: [],
-      perUrl: { inFlight: 1 },
+      network: 1,
+      rpc: [],
+      defaultRpcOptions: { inFlight: 1 },
       retry: { attempts: 3 },
     });
 
@@ -210,9 +206,9 @@ describe('RPCPoolProvider', () => {
     ]);
 
     const pool = new RPCPoolProvider({
-      chainId: 1,
-      urls: ['http://rpc1.invalid'],
-      perUrl: { inFlight: 10, rps: 1 }, // 1 requests per second
+      network: 1,
+      rpc: [{ url: 'http://rpc1.example' }],
+      defaultRpcOptions: { inFlight: 10, rps: 1 }, // 1 requests per second
       retry: { attempts: 1 },
     });
 

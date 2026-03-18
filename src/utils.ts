@@ -1,22 +1,22 @@
-import { InstrumentedStaticJsonRpcProvider } from './InstrumentedProvider';
+import { InstrumentedJsonRpcProvider } from './InstrumentedProvider';
 
 export interface Endpoint {
   providerId: string;
   url: string;
-  provider: InstrumentedStaticJsonRpcProvider;
+  provider: InstrumentedJsonRpcProvider;
 }
 
 export type RpcEvent =
   | {
       type: 'request';
-      chainId: number;
+      chainId: bigint;
       providerId: string;
       method: string;
       startedAt: number;
     }
   | {
       type: 'response';
-      chainId: number;
+      chainId: bigint;
       providerId: string;
       method: string;
       startedAt: number;
@@ -25,7 +25,7 @@ export type RpcEvent =
     }
   | {
       type: 'error';
-      chainId: number;
+      chainId: bigint;
       providerId: string;
       method: string;
       startedAt: number;

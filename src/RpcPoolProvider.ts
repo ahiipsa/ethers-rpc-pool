@@ -1,13 +1,21 @@
-import { JsonRpcProvider, Network } from 'ethers';
+import { FetchRequest, JsonRpcProvider, Network, Networkish } from 'ethers';
 import { Stats } from './Stats';
 import { Endpoint, RpcEvent, shouldFailover } from './utils';
-import { InstrumentedStaticJsonRpcProvider } from './InstrumentedProvider';
+import {
+  InstrumentedJsonRpcProvider,
+  InstrumentedJsonRpcProviderOptions,
+} from './InstrumentedProvider';
 import { Router } from './Router';
 
+interface RPCPoolProviderOptions extends Partial<InstrumentedJsonRpcProviderOptions> {
+  url: string | FetchRequest;
+  network?: Networkish;
+}
+
 export interface RPCPoolProviderParams {
-  chainId: number;
-  urls: string[];
-  perUrl: { inFlight: number; timeout?: number; rps?: number; rpsBurst?: number };
+  network: Networkish;
+  rpc: RPCPoolProviderOptions[];
+  defaultRpcOptions: { inFlight: number; timeout?: number; rps?: number; rpsBurst?: number };
   retry: { attempts: number };
   hooks?: {
     onEvent(e: RpcEvent): void;
@@ -24,27 +32,22 @@ export class RPCPoolProvider extends JsonRpcProvider {
   readonly stats: Stats;
 
   constructor(params: RPCPoolProviderParams) {
-    const network = Network.from(params.chainId);
+    const network = Network.from(params.network);
     super('http://localhost', network, { staticNetwork: network });
 
     this.params = params;
 
     this.stats = new Stats();
 
-    const endpoints: Endpoint[] = this.params.urls.map((url, i) => {
-      const providerId = `rpc#${i + 1}-chainId:${this.params.chainId}-${url}`;
+    const endpoints: Endpoint[] = this.params.rpc.map((options, i) => {
+      const url = typeof options.url === 'string' ? options.url : options.url.url;
+      const providerId = `rpc#${i + 1}-chainId:${this.params.network}-${url}`;
 
-      const { inFlight = 1, rps = 1, rpsBurst, timeout = 10_000 } = this.params.perUrl;
-
-      const provider = new InstrumentedStaticJsonRpcProvider({
-        url,
-        chainId: this.params.chainId,
+      const provider = new InstrumentedJsonRpcProvider(options.url, this.params.network, {
         providerId,
         stats: this.stats,
-        inFlight,
-        rps,
-        rpsBurst,
-        timeout,
+        ...this.params.defaultRpcOptions,
+        ...options,
         onEvent: this.params.hooks?.onEvent,
       });
 

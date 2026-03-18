@@ -1,4 +1,11 @@
-import { JsonRpcProvider, Network, JsonRpcPayload, FetchRequest } from 'ethers';
+import {
+  JsonRpcProvider,
+  Network,
+  JsonRpcPayload,
+  FetchRequest,
+  JsonRpcApiProviderOptions,
+  Networkish,
+} from 'ethers';
 import { Semaphore } from './Semaphore';
 import { Stats } from './Stats';
 import {
@@ -11,9 +18,7 @@ import {
 } from './utils';
 import { RpsLimiter } from './RpsLimiter';
 
-interface ProviderParams {
-  url: string;
-  chainId: number;
+export interface InstrumentedJsonRpcProviderOptions extends JsonRpcApiProviderOptions {
   providerId: string;
   stats: Stats;
   inFlight?: number;
@@ -23,13 +28,13 @@ interface ProviderParams {
   onEvent?: (e: RpcEvent) => void;
 }
 /**
- * Instrumented StaticJsonRpcProvider.
+ * Instrumented JsonRpcProvider.
  * Tracks requests, inFlight count, rate limits, and per-method / per-provider metrics.
  */
-export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
+export class InstrumentedJsonRpcProvider extends JsonRpcProvider {
   readonly providerId: string;
-  readonly chainId: number;
-  readonly params: ProviderParams;
+  readonly chainId: bigint;
+  readonly options: InstrumentedJsonRpcProviderOptions;
 
   readonly inFlightLimiter: Semaphore;
   readonly rpsLimiter: RpsLimiter;
@@ -38,25 +43,33 @@ export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
 
   private lastCooldownMs: number = 0;
 
-  constructor(params: ProviderParams) {
-    const { url, providerId, chainId } = params;
+  constructor(
+    url: string | FetchRequest,
+    network: Networkish,
+    options: InstrumentedJsonRpcProviderOptions,
+  ) {
+    let fetchRequest: FetchRequest;
 
-    const network = Network.from(chainId);
-    const fetchRequest = new FetchRequest(url);
+    if (typeof url == 'string') {
+      fetchRequest = new FetchRequest(url);
+    } else {
+      fetchRequest = url;
+    }
 
-    fetchRequest.timeout = params.timeout || 10_000;
+    fetchRequest.timeout = options.timeout || 10_000;
 
-    super(fetchRequest, chainId, { staticNetwork: network, batchMaxCount: 1 });
+    const _network = Network.from(network);
+    super(fetchRequest, _network, { staticNetwork: true, ...options });
     this.fetchRequest = fetchRequest;
-    this.providerId = providerId;
-    this.chainId = chainId;
-    this.params = params;
+    this.providerId = options.providerId;
+    this.chainId = _network.chainId;
+    this.options = options;
 
-    const { rps = 10, rpsBurst, inFlight = 1 } = params;
+    const { rps = 10, rpsBurst, inFlight = 1 } = options;
 
     this.inFlightLimiter = new Semaphore(inFlight);
     this.rpsLimiter = new RpsLimiter(rps, rpsBurst || rps);
-    this.stats = params.stats;
+    this.stats = options.stats;
   }
 
   override async _send(payload: JsonRpcPayload | JsonRpcPayload[]): Promise<any> {
@@ -82,7 +95,7 @@ export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
 
     for (const p of payloads) {
       this.stats.bumpPerMethod(p.method);
-      this.params.onEvent?.({
+      this.options.onEvent?.({
         type: 'request',
         chainId: this.chainId,
         providerId: this.providerId,
@@ -97,7 +110,7 @@ export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
       const endedAt = Date.now();
 
       for (const p of payloads) {
-        this.params.onEvent?.({
+        this.options.onEvent?.({
           type: 'response',
           chainId: this.chainId,
           providerId: this.providerId,
@@ -146,7 +159,7 @@ export class InstrumentedStaticJsonRpcProvider extends JsonRpcProvider {
       }
 
       for (const p of payloads) {
-        this.params.onEvent?.({
+        this.options.onEvent?.({
           type: 'error',
           chainId: this.chainId,
           providerId: this.providerId,

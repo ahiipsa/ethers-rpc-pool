@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
 import { JsonRpcProvider } from 'ethers';
-import { InstrumentedStaticJsonRpcProvider } from '../src/InstrumentedProvider';
+import { InstrumentedJsonRpcProvider } from '../src/InstrumentedProvider';
 import { Stats } from '../src/Stats';
 import type { RpcEvent } from '../src/utils';
 import { sleep } from './helpers/utils';
@@ -38,9 +38,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
     const stats = new Stats();
     const events: RpcEvent[] = [];
 
-    const provider = new InstrumentedStaticJsonRpcProvider({
-      chainId: 1,
-      url: 'http://example.invalid',
+    const provider = new InstrumentedJsonRpcProvider('http://example.invalid', 1, {
       providerId: 'p1',
       stats,
       onEvent: (e) => events.push(e),
@@ -80,9 +78,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
 
     const events: RpcEvent[] = [];
 
-    const provider = new InstrumentedStaticJsonRpcProvider({
-      chainId: 1,
-      url: 'http://example.invalid',
+    const provider = new InstrumentedJsonRpcProvider('http://example.invalid', 1, {
       providerId: 'p1',
       stats,
       onEvent: (e) => events.push(e),
@@ -114,9 +110,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
 
     const events: RpcEvent[] = [];
 
-    const provider = new InstrumentedStaticJsonRpcProvider({
-      chainId: 1,
-      url: testServer.baseUrl + '/timeout/5000',
+    const provider = new InstrumentedJsonRpcProvider(testServer.baseUrl + '/timeout/5000', 1, {
       providerId: 'p1',
       timeout: 1000,
       stats,
@@ -145,9 +139,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
     const stats = new Stats();
     const events: RpcEvent[] = [];
 
-    const p = new InstrumentedStaticJsonRpcProvider({
-      chainId: 1,
-      url: testServer.baseUrl + '/timeout/5000',
+    const p = new InstrumentedJsonRpcProvider(testServer.baseUrl + '/timeout/5000', 1, {
       providerId: 'p1',
       stats,
       timeout: 1000,
@@ -191,9 +183,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
     const stats = new Stats();
     const setCooldownSpy = vi.spyOn(stats, 'setCooldown');
 
-    const p = new InstrumentedStaticJsonRpcProvider({
-      chainId: 1,
-      url: 'http://example.invalid',
+    const p = new InstrumentedJsonRpcProvider('http://example.invalid', 1, {
       providerId: 'p1',
       stats,
       inFlight: 10,
@@ -232,9 +222,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
 
     const stats = new Stats();
 
-    const p = new InstrumentedStaticJsonRpcProvider({
-      chainId: 1,
-      url: 'http://example.invalid',
+    const p = new InstrumentedJsonRpcProvider('http://example.invalid', 1, {
       providerId: 'p1',
       stats,
       inFlight: 1,
@@ -272,9 +260,7 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
 
     const stats = new Stats();
 
-    const provider = new InstrumentedStaticJsonRpcProvider({
-      chainId: 1,
-      url: 'http://example.invalid',
+    const provider = new InstrumentedJsonRpcProvider('http://example.invalid', 1, {
       providerId: 'p1',
       stats,
       inFlight: 10,
