@@ -15,6 +15,31 @@ Designed for production backends and dApps that need:
 
 ---
 
+## Table of Contents
+
+- [Why ethers-rpc-pool](#why-ethers-rpc-pool)
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- - [Interfaces](#interfaces)
+- - [RPCPoolProvider Options](#rpcpoolprovider-options)
+- - [JsonRpcProvider Options](#jsonrpcprovider-options)
+- [How It Works](#how-it-works)
+- - [Routing](#1-routing)
+- - [Concurrency Control](#2-concurrency-control)
+- - [Rate Limiting](#3-rate-limiting)
+- - [Retry Strategy](#4-retry-strategy)
+- [Instrumentation & Metrics](#instrumentation--metrics)
+- [Production Considerations](#production-considerations)
+- - [Recommended Settings](#recommended-settings)
+- - [Known Limitations](#known-limitations)
+- [When To Use](#when-to-use)
+- [Example Architecture](#example-architecture)
+- [Roadmap](#roadmap)
+- [License](#license)
+
 ## Why ethers-rpc-pool?
 
 Most production apps rely on a single RPC provider. This creates:
@@ -87,10 +112,10 @@ const balance = await poolProvider.getBalance('0x...');
 
 ## Configuration
 
-### RPCPoolProviderParams
+### Interfaces
 
 ```ts
-interface RpcProviderParams {
+interface RPCParameters {
   inFlight?: number;
   timeout?: number;
   rps?: number;
@@ -114,7 +139,7 @@ interface RpcProviderParams {
 ```
 
 ```ts
-interface RPCPoolProviderParams {
+interface PoolProviderParameters {
   network: number;
   rpc: RpcProviderOptions[];
   defaultRpcOptions?: RpcProviderOptions;
@@ -127,7 +152,7 @@ interface RPCPoolProviderParams {
 }
 ```
 
-### RPCPoolProvider params explained
+### RPCPoolProvider Options
 
 | Option           | Description                               |
 | ---------------- | ----------------------------------------- |
@@ -136,7 +161,7 @@ interface RPCPoolProviderParams {
 | `retry.attempts` | Maximum number of unique endpoints to try |
 | `hooks.onEvent`  | Optional instrumentation hook             |
 
-### RpcProviderOptions params explained
+### JsonRpcProvider Options
 
 | Option     | Description                                                                                                                                  |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
