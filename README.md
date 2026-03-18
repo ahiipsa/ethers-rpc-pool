@@ -104,9 +104,6 @@ interface RPCPoolProviderParams {
     rps?: number;
     rpsBurst?: number;
   };
-  perUrl: {
-    inFlight: number;
-  };
   retry: {
     attempts: number;
   };
@@ -251,13 +248,12 @@ Useful for:
 
 - `inFlight`: 1–2 depending on rpc provider limits
 - `retry.attempts`: 2–3
-- Use at least 2–3 independent RPC providers
+- Use at least 3–5 independent RPC providers
 
 ### Known Limitations
 
 - Basic circuit breaker/cooldown
 - No sticky session/blockTag consistency yet
-- No built-in JSON-RPC batching
 - Archive/debug/trace methods depend on underlying RPC support
 
 ---
@@ -301,7 +297,6 @@ Not intended for:
 - Circuit breaker + health scoring
 - Sticky session / blockTag consistency
 - Adaptive latency-based routing
-- JSON-RPC batch support
 - Singleflight request deduplication
 
 ---
