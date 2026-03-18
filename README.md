@@ -68,18 +68,17 @@ import { RPCPoolProvider } from 'ethers-rpc-pool';
 const poolProvider = new RPCPoolProvider({
   chainId: 1,
   rpc: [
-    { url: 'http://rpc1.example' },
-    { url: 'http://rpc2.example' },
-    { url: 'http://rpc3.example' },
-    { url: 'http://rpc4.example' },
-    { url: 'http://rpc5.example' },
+    { url: 'https://eth.drpc.org' },
+    { url: 'https://eth1.lava.build' },
+    { url: 'https://rpc.mevblocker.io' },
+    { url: 'https://eth.blockrazor.xyz' },
+    { url: 'https://public-eth.nownodes.io' },
   ],
   defaultRpcOptions: { inFlight: 1, timeout: 3000, rps: 2, rpsBurst: 5 },
-  retry: { attempts: 2 },
+  retry: { attempts: 3 },
 });
 
 // Use it like a regular `JsonRpcProvider`:
-
 const blockNumber = await poolProvider.getBlockNumber();
 const balance = await poolProvider.getBalance('0x...');
 ```
@@ -91,19 +90,34 @@ const balance = await poolProvider.getBalance('0x...');
 ### RPCPoolProviderParams
 
 ```ts
+interface RpcProviderParams {
+  inFlight?: number;
+  timeout?: number;
+  rps?: number;
+  rpsBurst?: number;
+
+  // Optional instrumentation hook for provider-level events
+  stats?: Stats;
+  onEvent?: (e: RpcEvent) => void;
+  providerId: string;
+
+  // Optional JsonRpcProvider options for compatibility
+  // https://docs.ethers.org/v6/api/providers/jsonrpc/#JsonRpcApiProviderOptions
+  batchStallTime?: number;
+  batchMaxSize?: number;
+  batchMaxCount?: number;
+  staticNetwork?: null | boolean | Network;
+  polling?: boolean;
+  cacheTimeout?: number;
+  pollingInterval?: number;
+}
+```
+
+```ts
 interface RPCPoolProviderParams {
   network: number;
-  rpc: {
-    url: string;
-    timeout?: number;
-    rps?: number;
-    rpsBurst?: number;
-  }[];
-  defaultRpcOptions?: {
-    timeout?: number;
-    rps?: number;
-    rpsBurst?: number;
-  };
+  rpc: RpcProviderOptions[];
+  defaultRpcOptions?: RpcProviderOptions;
   retry: {
     attempts: number;
   };
@@ -113,18 +127,24 @@ interface RPCPoolProviderParams {
 }
 ```
 
-### Options Explained
+### RPCPoolProvider params explained
 
-| Option                       | Description                                                                                                                           |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `network`                    | Target chain ID                                                                                                                       |
-| `rpc`                        | List of RPC endpoints                                                                                                                 |
-| `defaultRpcOptions.inFlight` | Max concurrent requests per endpoint                                                                                                  |
-| `defaultRpcOptions.timeout`  | Timeout in ms for each request to this URL, default 10s                                                                               |
-| `defaultRpcOptions.rps`      | Maximum number of requests per second allowed for a single RPC endpoint. Enforced using a token bucket rate limiter.                  |
-| `defaultRpcOptions.rpsBurst` | Maximum burst capacity for the rate limiter. Allows short spikes above the sustained rate by accumulating tokens during idle periods. |
-| `retry.attempts`             | Maximum number of unique endpoints to try                                                                                             |
-| `hooks.onEvent`              | Optional instrumentation hook                                                                                                         |
+| Option           | Description                               |
+| ---------------- | ----------------------------------------- |
+| `network`        | Target chain ID                           |
+| `rpc`            | List of RPC endpoints                     |
+| `retry.attempts` | Maximum number of unique endpoints to try |
+| `hooks.onEvent`  | Optional instrumentation hook             |
+
+### RpcProviderOptions params explained
+
+| Option     | Description                                                                                                                                  |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `inFlight` | Max concurrent requests per endpoint                                                                                                         |
+| `timeout`  | Timeout in ms for each request to this URL, default 10s                                                                                      |
+| `rps`      | Maximum number of requests per second allowed for a single RPC endpoint. Enforced using a token bucket rate limiter.                         |
+| `rpsBurst` | Maximum burst capacity for the rate limiter. Allows short spikes above the sustained rate by accumulating tokens during idle periods.        |
+| ...        | Also allows customization of [ethers.JsonRpcApiProviderOptions](https://docs.ethers.org/v6/api/providers/jsonrpc/#JsonRpcApiProviderOptions) |
 
 ---
 
@@ -138,7 +158,7 @@ Requests are routed through an internal `Router`, which selects an available end
 
 Each endpoint has its own semaphore limiter:
 
-```ts
+```
 inFlight: number;
 ```
 
@@ -148,7 +168,34 @@ This prevents:
 - Triggering provider-side throttling
 - Self-induced retry storms
 
-### 3. Retry Strategy
+### 3. Rate Limiting
+
+Each RPC endpoint uses a token bucket rate limiter to control request throughput.
+
+```
+rps: number;
+rpsBurst: number;
+```
+
+Where:
+
+- `rps` defines the sustained request rate
+- `rpsBurst` defines how many requests may temporarily exceed that rate (**maximum burst capacity**)
+
+This helps:
+
+- Prevent 429 rate limit errors
+- Smooth traffic spikes
+- Protect RPC providers
+- Improve overall system stability
+
+Unused capacity accumulates as tokens and may be consumed during short traffic bursts.
+
+### 4. Retry Strategy
+
+```
+retry.attempts: number
+```
 
 If a retryable error occurs:
 
