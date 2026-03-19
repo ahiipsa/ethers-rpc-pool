@@ -154,12 +154,13 @@ interface PoolProviderParameters {
 
 ### RPCPoolProvider Options
 
-| Option           | Description                               |
-| ---------------- | ----------------------------------------- |
-| `network`        | Target chain ID                           |
-| `rpc`            | List of RPC endpoints                     |
-| `retry.attempts` | Maximum number of unique endpoints to try |
-| `hooks.onEvent`  | Optional instrumentation hook             |
+| Option              | Description                               |
+| ------------------- | ----------------------------------------- |
+| `network`           | Target chain ID                           |
+| `rpc`               | List of RPC endpoints                     |
+| `retry.attempts`    | Maximum number of unique endpoints to try |
+| `defaultRpcOptions` | Default options for all RPC endpoints     |
+| `hooks.onEvent`     | Optional instrumentation hook             |
 
 ### JsonRpcProvider Options
 
