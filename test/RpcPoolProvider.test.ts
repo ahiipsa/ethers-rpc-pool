@@ -32,6 +32,10 @@ describe('RPCPoolProvider', () => {
   });
 
   it('send(): success on first picked endpoint (no retries)', async () => {
+    const baseSend = vi.spyOn(JsonRpcProvider.prototype, '_send').mockResolvedValue([
+      { id: 1, result: 'OK' },
+      { id: 2, result: 'OK' },
+    ]);
     const pool = new RPCPoolProvider({
       network: 1,
       rpc: [{ url: 'http://rpc1.example' }, { url: 'http://rpc2.example' }],
