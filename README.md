@@ -38,6 +38,7 @@ Designed for production backends and dApps that need:
 - [When To Use](#when-to-use)
 - [Example Architecture](#example-architecture)
 - [Roadmap](#roadmap)
+- [Article](#article)
 - [License](#license)
 
 ## Why ethers-rpc-pool?
@@ -383,6 +384,14 @@ Not intended for:
 - Sticky session / blockTag consistency
 - Adaptive latency-based routing
 - Singleflight request deduplication
+
+---
+
+## Article
+
+Read the engineering story behind this library:
+
+(How I solved Ethereum RPC rate limits without paying $250/month)[https://dev.to/ahiipsa/how-i-solved-ethereum-rpc-rate-limits-with-traffic-engineering-instead-of-paying-250month-30ed]
 
 ---
 
