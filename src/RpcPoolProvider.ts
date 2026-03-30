@@ -60,18 +60,25 @@ export class RPCPoolProvider extends JsonRpcProvider {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async send(method: string, params: any): Promise<any> {
     const tried = new Set<string>();
-    const maxUniqueTries = Math.min(this.params.retry.attempts, this.router.size());
+    const maxAttempts = this.params.retry.attempts;
+    let attempts = 0;
 
-    while (tried.size < maxUniqueTries) {
+    while (attempts < maxAttempts) {
+      // All endpoints have been tried, reset for another round of attempts
+      if (tried.size === this.router.size()) {
+        tried.clear();
+      }
+
       const ep = this.router.pick();
       if (tried.has(ep.providerId)) continue;
       tried.add(ep.providerId);
+      attempts++;
 
       try {
         return await ep.provider.send(method, params);
       } catch (e: any) {
         if (!shouldFailover(e)) throw e;
-        if (tried.size >= maxUniqueTries) throw e;
+        if (attempts >= maxAttempts) throw e;
 
         // Add exponential backoff with jitter before retry
         const baseDelay = Math.min(1000 * Math.pow(2, tried.size - 1), 5000);
