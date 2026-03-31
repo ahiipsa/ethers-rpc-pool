@@ -94,7 +94,7 @@ export class InstrumentedJsonRpcProvider extends JsonRpcProvider {
     this.stats.bumpProviderTotal(this.providerId);
 
     for (const p of payloads) {
-      this.stats.bumpPerMethod(p.method);
+      this.stats.bumpPerMethod(this.providerId, p.method);
       this.options.onEvent?.({
         type: 'request',
         chainId: this.chainId,
@@ -172,6 +172,7 @@ export class InstrumentedJsonRpcProvider extends JsonRpcProvider {
           status: getHttpStatus(e),
           code: e?.code,
           message: String(e?.message || e),
+          errorKind: 'transport',
         });
       }
 

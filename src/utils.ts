@@ -36,6 +36,7 @@ export type RpcEvent =
       status?: number;
       code?: string;
       message: string;
+      errorKind?: 'transport' | 'rpc';
     };
 
 export function getHttpStatus(e: any): number | undefined {
@@ -84,6 +85,35 @@ export function isTimeoutError(e: any): boolean {
 
   // node-fetch / undici / axios / nginx / generic
   return /timeout|timed out|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED|504 Gateway/i.test(msg);
+}
+
+export function isTransportError(e: any): boolean {
+  return isTimeoutError(e) || isRateLimitError(e) || isServerError(e);
+}
+
+/**
+ * JSON-RPC / application-level error:
+ * the RPC responded, but the call itself failed logically.
+ *
+ * Examples:
+ * - getLogs block range too large
+ * - invalid params
+ * - execution reverted
+ * - method not supported
+ */
+export function isRpcLogicalError(e: any): boolean {
+  if (isTransportError(e)) return false;
+
+  // ethers often preserves code/message for JSON-RPC errors
+  if (e?.error?.code !== undefined) return true;
+  if (e?.code === 'CALL_EXCEPTION') return true;
+  if (e?.code === 'UNKNOWN_ERROR' && e?.error) return true;
+
+  const msg = String(e?.message || e);
+
+  return /execution reverted|invalid params|method not found|method not supported|block range|too many blocks|getLogs/i.test(
+    msg,
+  );
 }
 
 export function shouldFailover(e: any): boolean {

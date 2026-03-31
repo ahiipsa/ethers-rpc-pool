@@ -1,6 +1,6 @@
 import { FetchRequest, JsonRpcProvider, Network, Networkish } from 'ethers';
 import { Stats } from './Stats';
-import { Endpoint, RpcEvent, shouldFailover } from './utils';
+import { Endpoint, isRpcLogicalError, RpcEvent, shouldFailover } from './utils';
 import {
   InstrumentedJsonRpcProvider,
   InstrumentedJsonRpcProviderOptions,
@@ -77,9 +77,13 @@ export class RPCPoolProvider extends JsonRpcProvider {
 
       tried.add(endpoint.providerId);
 
+      const startedAt = Date.now();
       try {
         return await endpoint.provider.send(method, params);
       } catch (e: any) {
+        if (isRpcLogicalError(e)) {
+          this.emitRpcLogicalError(endpoint, method, startedAt, e);
+        }
         if (!shouldFailover(e)) throw e;
         if (attempt === maxAttempts - 1) throw e;
 
@@ -95,6 +99,28 @@ export class RPCPoolProvider extends JsonRpcProvider {
     const jitter = Math.random() * baseDelay;
 
     await new Promise((resolve) => setTimeout(resolve, jitter));
+  }
+
+  private emitRpcLogicalError(ep: Endpoint, method: string, startedAt: number, error: any): void {
+    const endedAt = Date.now();
+
+    this.stats.bumpRpcError(ep.providerId, method);
+
+    this.params.hooks?.onEvent?.({
+      type: 'error',
+      chainId: BigInt(Network.from(this.params.network).chainId),
+      providerId: ep.providerId,
+      method,
+      startedAt,
+      endedAt,
+      ms: endedAt - startedAt,
+      isRateLimit: false,
+      isTimeout: false,
+      status: undefined,
+      code: error?.code,
+      message: String(error?.message || error),
+      errorKind: 'rpc',
+    });
   }
 
   getStats(): Stats {
