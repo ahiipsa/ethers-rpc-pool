@@ -35,6 +35,15 @@ export class RpsLimiter {
     this.lastRefill = now;
   }
 
+  isAvailable(count = 1): boolean {
+    if (!this.rps || this.rps <= 0) return true;
+
+    const now = Date.now();
+    this.refill(now);
+
+    return this.tokens >= count;
+  }
+
   // Take count tokens (usually 1 request = 1 token).
   // If not enough tokens — wait and try again.
   async take(count = 1): Promise<void> {

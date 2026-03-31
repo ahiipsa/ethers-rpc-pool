@@ -8,6 +8,10 @@ export class Semaphore {
     }
   }
 
+  isAvailable(): boolean {
+    return this.inUse < this.max;
+  }
+
   async acquire(): Promise<() => void> {
     if (this.inUse < this.max) {
       this.inUse++;

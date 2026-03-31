@@ -84,6 +84,10 @@ export class InstrumentedJsonRpcProvider extends JsonRpcProvider {
     }
   }
 
+  isAvailable(count = 1): boolean {
+    return this.rpsLimiter.isAvailable(count) && this.inFlightLimiter.isAvailable();
+  }
+
   // ethers v5 calls send(method, params)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async _sendInstrumented(payload: JsonRpcPayload | JsonRpcPayload[]): Promise<any> {

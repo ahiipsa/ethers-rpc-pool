@@ -19,7 +19,7 @@ export class Router {
       const i = ((this.rr++ % n) + n) % n;
       const ep = this.endpoints[i];
 
-      if (!this.stats.isInCooldown(ep.providerId)) return ep;
+      if (!this.stats.isInCooldown(ep.providerId) && ep.provider.isAvailable(1)) return ep;
     }
     // if all are in cooldown, return the next one in round-robin order
     return this.endpoints[((this.rr++ % n) + n) % n];
