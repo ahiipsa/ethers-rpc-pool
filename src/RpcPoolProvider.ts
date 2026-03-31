@@ -61,33 +61,40 @@ export class RPCPoolProvider extends JsonRpcProvider {
   async send(method: string, params: any): Promise<any> {
     const tried = new Set<string>();
     const maxAttempts = this.params.retry.attempts;
-    let attempts = 0;
 
-    while (attempts < maxAttempts) {
-      // All endpoints have been tried, reset for another round of attempts
-      if (tried.size === this.router.size()) {
-        tried.clear();
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      let endpoint = this.router.pick();
+
+      // first, try to pick an endpoint that hasn't been tried yet
+      if (tried.size < this.router.size()) {
+        let retries = 0;
+
+        while (tried.has(endpoint.providerId) && retries < this.router.size()) {
+          endpoint = this.router.pick();
+          retries++;
+        }
       }
 
-      const ep = this.router.pick();
-      if (tried.has(ep.providerId)) continue;
-      tried.add(ep.providerId);
-      attempts++;
+      tried.add(endpoint.providerId);
 
       try {
-        return await ep.provider.send(method, params);
+        return await endpoint.provider.send(method, params);
       } catch (e: any) {
         if (!shouldFailover(e)) throw e;
-        if (attempts >= maxAttempts) throw e;
+        if (attempt === maxAttempts - 1) throw e;
 
-        // Add exponential backoff with jitter before retry
-        const baseDelay = Math.min(1000 * Math.pow(2, tried.size - 1), 5000);
-        const jitter = Math.random() * baseDelay;
-        await new Promise((resolve) => setTimeout(resolve, jitter));
+        await this.sleepWithBackoff(attempt);
       }
     }
 
     throw new Error('No RPC available');
+  }
+
+  private async sleepWithBackoff(attempt: number): Promise<void> {
+    const baseDelay = Math.min(1000 * 2 ** attempt, 5000);
+    const jitter = Math.random() * baseDelay;
+
+    await new Promise((resolve) => setTimeout(resolve, jitter));
   }
 
   getStats(): Stats {
