@@ -92,7 +92,7 @@ npm install ethers-rpc-pool
 import { RPCPoolProvider } from 'ethers-rpc-pool';
 
 const poolProvider = new RPCPoolProvider({
-  chainId: 1,
+  network: 1,
   rpc: [
     { url: 'https://eth.drpc.org' },
     { url: 'https://eth1.lava.build' },
@@ -135,10 +135,10 @@ interface RPCParameters {
 ```
 
 ```ts
-interface PoolProviderParameters {
-  network: number;
-  rpc: RpcProviderOptions[];
-  defaultRpcOptions?: RpcProviderOptions;
+interface RPCPoolProviderParams {
+  network: Networkish;
+  rpc: RPCPoolProviderOptions[];
+  defaultRpcOptions: { inFlight: number; timeout?: number; rps?: number; rpsBurst?: number };
   retry: {
     attempts: number;
   };
@@ -150,13 +150,13 @@ interface PoolProviderParameters {
 
 ### RPCPoolProvider Options
 
-| Option              | Description                               |
-| ------------------- | ----------------------------------------- |
-| `network`           | Target chain ID                           |
-| `rpc`               | List of RPC endpoints                     |
-| `retry.attempts`    | Maximum number of unique endpoints to try |
-| `defaultRpcOptions` | Default options for all RPC endpoints     |
-| `hooks.onEvent`     | Optional instrumentation hook             |
+| Option              | Description                                                                               |
+| ------------------- | ----------------------------------------------------------------------------------------- |
+| `network`           | Chain identifier (`Networkish`: chain ID number, name string, or ethers `Network` object) |
+| `rpc`               | List of RPC endpoints                                                                     |
+| `retry.attempts`    | Maximum number of unique endpoints to try                                                 |
+| `defaultRpcOptions` | Default options for all RPC endpoints                                                     |
+| `hooks.onEvent`     | Optional instrumentation hook                                                             |
 
 ### JsonRpcProvider Options
 
@@ -281,8 +281,12 @@ console.log(stats.snapshot());
   },
   "rateLimitedTotal": 0,
   "timeoutTotal": 0,
+  "rpcErrorTotal": 0,
   "perProviderRateLimited": {},
   "perProviderTimeout": {},
+  "perProviderError": {},
+  "perProviderRpcError": {},
+  "perMethodRpcError": {},
   "providerCooldownUntil": {},
   "perProviderInFlight": {
     "rpc#1-chainId:1-https://eth.drpc.org": 0,
@@ -297,6 +301,9 @@ console.log(stats.snapshot());
     "rpc#3-chainId:1-https://rpc.mevblocker.io": 21,
     "rpc#4-chainId:1-https://eth.blockrazor.xyz": 21,
     "rpc#5-chainId:1-https://public-eth.nownodes.io": 21
+  },
+  "perProviderMethod": {
+    "rpc#1-chainId:1-https://eth.drpc.org": { "eth_blockNumber": 21 }
   }
 }
 ```
@@ -386,7 +393,7 @@ Not intended for:
 
 Read the engineering story behind this library:
 
-(How I solved Ethereum RPC rate limits without paying $250/month)[https://dev.to/ahiipsa/how-i-solved-ethereum-rpc-rate-limits-with-traffic-engineering-instead-of-paying-250month-30ed]
+[How I solved Ethereum RPC rate limits without paying $250/month](https://dev.to/ahiipsa/how-i-solved-ethereum-rpc-rate-limits-with-traffic-engineering-instead-of-paying-250month-30ed)
 
 ---
 
