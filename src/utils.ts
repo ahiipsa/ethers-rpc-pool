@@ -34,6 +34,7 @@ export type RpcEvent =
       isRateLimit: boolean;
       isTimeout: boolean;
       status?: number;
+      retryAfterMs?: number;
       code?: string;
       message: string;
       errorKind?: 'transport' | 'rpc';

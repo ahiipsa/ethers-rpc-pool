@@ -6,6 +6,7 @@ import {
   InstrumentedJsonRpcProviderOptions,
 } from './InstrumentedProvider';
 import { Router } from './Router';
+import { CooldownManager } from './CooldownManager';
 
 interface RPCPoolProviderOptions extends Partial<InstrumentedJsonRpcProviderOptions> {
   url: string | FetchRequest;
@@ -24,20 +25,21 @@ export interface RPCPoolProviderParams {
 
 // TODO
 // -- circuit breaker + health checks
-// -- sticky “session”
+// -- sticky "session"
 
 export class RPCPoolProvider extends JsonRpcProvider {
   readonly router: Router;
   readonly params: RPCPoolProviderParams;
   readonly stats: Stats;
+  private readonly cooldownManager: CooldownManager;
 
   constructor(params: RPCPoolProviderParams) {
     const network = Network.from(params.network);
     super('http://localhost', network, { staticNetwork: network });
 
     this.params = params;
-
     this.stats = new Stats();
+    this.cooldownManager = new CooldownManager(this.stats);
 
     const endpoints: Endpoint[] = this.params.rpc.map((options, i) => {
       const url = typeof options.url === 'string' ? options.url : options.url.url;
@@ -45,10 +47,9 @@ export class RPCPoolProvider extends JsonRpcProvider {
 
       const provider = new InstrumentedJsonRpcProvider(options.url, this.params.network, {
         providerId,
-        stats: this.stats,
         ...this.params.defaultRpcOptions,
         ...options,
-        onEvent: this.params.hooks?.onEvent,
+        onEvent: (e) => this._handleTransportEvent(e),
       });
 
       return { providerId, url, provider };
@@ -84,26 +85,49 @@ export class RPCPoolProvider extends JsonRpcProvider {
         return await endpoint.provider.send(method, params);
       } catch (e: any) {
         if (isRpcLogicalError(e)) {
-          this.emitRpcLogicalError(endpoint, method, startedAt, e);
+          this._emitRpcLogicalError(endpoint, method, startedAt, e);
         }
         if (!shouldFailover(e)) throw e;
         if (attempt === maxAttempts - 1) throw e;
 
-        await this.sleepWithBackoff(attempt);
+        await this._sleepWithBackoff(attempt);
       }
     }
 
     throw new Error('No RPC available');
   }
 
-  private async sleepWithBackoff(attempt: number): Promise<void> {
+  private _handleTransportEvent(e: RpcEvent): void {
+    this._aggregateStats(e);
+    this.cooldownManager.onEvent(e);
+    this.params.hooks?.onEvent?.(e);
+  }
+
+  private _aggregateStats(e: RpcEvent): void {
+    const id = e.providerId;
+    if (e.type === 'request') {
+      this.stats.bumpInFlightPerProvider(id);
+      this.stats.bumpProviderTotal(id);
+      this.stats.bumpPerMethod(id, e.method);
+    } else {
+      this.stats.decreaseInFlightPerProvider(id);
+      if (e.type === 'error') {
+        if (e.isRateLimit) this.stats.bumpRateLimitedPerProvider(id);
+        else if (e.isTimeout) this.stats.bumpTimeoutPerProvider(id);
+        else if (e.status !== undefined && e.status >= 500)
+          this.stats.bumpServerErrorPerProvider(id);
+      }
+    }
+  }
+
+  private async _sleepWithBackoff(attempt: number): Promise<void> {
     const baseDelay = Math.min(1000 * 2 ** attempt, 5000);
     const jitter = Math.random() * baseDelay;
 
     await new Promise((resolve) => setTimeout(resolve, jitter));
   }
 
-  private emitRpcLogicalError(ep: Endpoint, method: string, startedAt: number, error: any): void {
+  private _emitRpcLogicalError(ep: Endpoint, method: string, startedAt: number, error: any): void {
     const endedAt = Date.now();
 
     this.stats.bumpRpcError(ep.providerId, method);

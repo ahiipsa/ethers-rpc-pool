@@ -1,16 +1,3 @@
-export interface IProviderStats {
-  bumpInFlightPerProvider(id: string): void;
-  decreaseInFlightPerProvider(id: string): void;
-  bumpProviderTotal(id: string): void;
-  bumpPerMethod(id: string, method: string): void;
-  bumpRateLimitedPerProvider(id: string): void;
-  bumpTimeoutPerProvider(id: string): void;
-  bumpServerErrorPerProvider(id: string): void;
-  setCooldown(id: string, ms: number): void;
-  snapshot(): Readonly<RpcStatsSnapshot>;
-  timeoutRatio(id: string): number;
-}
-
 export interface IRouterStats {
   isInCooldown(id: string): boolean;
 }
@@ -34,7 +21,7 @@ export interface RpcStatsSnapshot {
   perProviderMethod: Record<string, Record<string, number>>;
 }
 
-export class Stats implements IProviderStats, IRouterStats {
+export class Stats implements IRouterStats {
   private _total = 0;
   private _inFlight = 0;
 
