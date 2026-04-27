@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
-import { JsonRpcProvider } from 'ethers';
+import { FetchRequest, JsonRpcProvider } from 'ethers';
 import { InstrumentedJsonRpcProvider } from '../src/InstrumentedProvider';
 import type { RpcEvent } from '../src/utils';
 import { sleep } from './helpers/utils';
@@ -29,11 +29,33 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
     vi.restoreAllMocks();
   });
 
-  it('success: emits request+response events', async () => {
+  // ─── constructor ───────────────────────────────────────────────────────────
+
+  it('accepts a FetchRequest object as URL (not just a string)', async () => {
     vi.spyOn(JsonRpcProvider.prototype, '_send').mockResolvedValue([{ id: 1, result: '0x01' }]);
 
     const events: RpcEvent[] = [];
+    const provider = new InstrumentedJsonRpcProvider(
+      new FetchRequest('http://example.invalid'),
+      1,
+      {
+        providerId: 'p1',
+        onEvent: (e) => events.push(e),
+      },
+    );
 
+    await provider.send('eth_chainId', []);
+
+    expect(events[0].type).toBe('request');
+    expect(events[1].type).toBe('response');
+  });
+
+  // ─── event emission ────────────────────────────────────────────────────────
+
+  it('success: emits request then response event with correct fields', async () => {
+    vi.spyOn(JsonRpcProvider.prototype, '_send').mockResolvedValue([{ id: 1, result: '0x01' }]);
+
+    const events: RpcEvent[] = [];
     const provider = new InstrumentedJsonRpcProvider('http://example.invalid', 1, {
       providerId: 'p1',
       onEvent: (e) => events.push(e),
@@ -42,28 +64,30 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
     const res = await provider.send('eth_chainId', []);
 
     expect(res).toBe('0x01');
-
     expect(events).toHaveLength(2);
-    expect(events[0].type).toBe('request');
-    expect(events[1].type).toBe('response');
 
-    if (events[0].type === 'request' && events[1].type === 'response') {
-      expect(events[0].providerId).toBe('p1');
-      expect(events[0].method).toBe('eth_chainId');
-      expect(events[1].providerId).toBe('p1');
-      expect(events[1].method).toBe('eth_chainId');
-      expect(events[1].ms).toBeGreaterThanOrEqual(0);
+    const [req, resp] = events;
+    expect(req.type).toBe('request');
+    expect(req.providerId).toBe('p1');
+    expect(req.method).toBe('eth_chainId');
+    expect(req.chainId).toBe(1n);
+
+    expect(resp.type).toBe('response');
+    expect(resp.providerId).toBe('p1');
+    expect(resp.method).toBe('eth_chainId');
+    expect(resp.chainId).toBe(1n);
+    if (resp.type === 'response') {
+      expect(resp.endedAt).toBeGreaterThanOrEqual(resp.startedAt);
+      expect(resp.ms).toBeGreaterThanOrEqual(0);
     }
   });
 
-  it('rate limit (429): emits error event with isRateLimit=true and retryAfterMs', async () => {
+  it('rate limit (429): emits error event with isRateLimit=true', async () => {
     const err: any = new Error('rate limit');
     err.status = 429;
-
     vi.spyOn(JsonRpcProvider.prototype, '_send').mockRejectedValue(err);
 
     const events: RpcEvent[] = [];
-
     const provider = new InstrumentedJsonRpcProvider('http://example.invalid', 1, {
       providerId: 'p1',
       onEvent: (e) => events.push(e),
@@ -77,15 +101,42 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
       expect(errorEvent.isRateLimit).toBe(true);
       expect(errorEvent.isTimeout).toBe(false);
       expect(errorEvent.status).toBe(429);
+      expect(errorEvent.retryAfterMs).toBeUndefined();
       expect(errorEvent.providerId).toBe('p1');
       expect(errorEvent.method).toBe('eth_blockNumber');
+      expect(errorEvent.chainId).toBe(1n);
       expect(errorEvent.errorKind).toBe('transport');
+      expect(errorEvent.endedAt).toBeGreaterThanOrEqual(errorEvent.startedAt);
+      expect(errorEvent.ms).toBeGreaterThanOrEqual(0);
     }
   });
 
-  it('timeout via thrown { code: TIMEOUT }: emits error event with isTimeout=true', async () => {
-    const events: RpcEvent[] = [];
+  it('server error (5xx): emits error event with correct status, isRateLimit=false, isTimeout=false', async () => {
+    const err: any = new Error('internal server error');
+    err.status = 500;
+    vi.spyOn(JsonRpcProvider.prototype, '_send').mockRejectedValue(err);
 
+    const events: RpcEvent[] = [];
+    const provider = new InstrumentedJsonRpcProvider('http://example.invalid', 1, {
+      providerId: 'p1',
+      onEvent: (e) => events.push(e),
+    });
+
+    await expect(provider.send('eth_call', [])).rejects.toThrow('internal server error');
+
+    const errorEvent = events.find((e) => e.type === 'error');
+    expect(errorEvent?.type).toBe('error');
+    if (errorEvent?.type === 'error') {
+      expect(errorEvent.isRateLimit).toBe(false);
+      expect(errorEvent.isTimeout).toBe(false);
+      expect(errorEvent.status).toBe(500);
+      expect(errorEvent.errorKind).toBe('transport');
+      expect(errorEvent.ms).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('timeout: emits error event with isTimeout=true', async () => {
+    const events: RpcEvent[] = [];
     const provider = new InstrumentedJsonRpcProvider(testServer.baseUrl + '/timeout/5000', 1, {
       providerId: 'p1',
       timeout: 1000,
@@ -102,31 +153,73 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
       expect(errorEvent.isTimeout).toBe(true);
       expect(errorEvent.isRateLimit).toBe(false);
       expect(errorEvent.errorKind).toBe('transport');
+      expect(errorEvent.ms).toBeGreaterThanOrEqual(0);
     }
   });
 
-  it('timeout when RPC hangs: emits error event with isTimeout=true', async () => {
-    const events: RpcEvent[] = [];
+  it('batch payload: emits one request+response event per payload', async () => {
+    vi.spyOn(JsonRpcProvider.prototype, '_send').mockResolvedValue([
+      { id: 1, result: 'r1' },
+      { id: 2, result: 'r2' },
+    ]);
 
-    const provider = new InstrumentedJsonRpcProvider(testServer.baseUrl + '/timeout/5000', 1, {
+    const events: RpcEvent[] = [];
+    const provider = new InstrumentedJsonRpcProvider('http://example.invalid', 1, {
       providerId: 'p1',
-      timeout: 1000,
       onEvent: (e) => events.push(e),
     });
 
-    await expect(
-      provider.send('eth_call', [
-        { to: '0x0000000000000000000000000000000000000000', data: '0x' },
-        'latest',
-      ]),
-    ).rejects.toThrow(/timeout/i);
+    const payloads = [
+      { method: 'eth_blockNumber', params: [], id: 1, jsonrpc: '2.0' as const },
+      { method: 'eth_chainId', params: [], id: 2, jsonrpc: '2.0' as const },
+    ];
+    await (provider as any)._send(payloads);
 
-    const errorEvent = events.find((e) => e.type === 'error');
-    expect(errorEvent?.type).toBe('error');
-    if (errorEvent?.type === 'error') {
-      expect(errorEvent.isTimeout).toBe(true);
-    }
+    const requestEvents = events.filter((e) => e.type === 'request');
+    const responseEvents = events.filter((e) => e.type === 'response');
+
+    expect(requestEvents).toHaveLength(2);
+    expect(responseEvents).toHaveLength(2);
+    expect(requestEvents[0].method).toBe('eth_blockNumber');
+    expect(requestEvents[1].method).toBe('eth_chainId');
+    expect(responseEvents[0].method).toBe('eth_blockNumber');
+    expect(responseEvents[1].method).toBe('eth_chainId');
   });
+
+  // ─── isAvailable ───────────────────────────────────────────────────────────
+
+  describe('isAvailable()', () => {
+    it('returns true on a fresh provider', () => {
+      const provider = new InstrumentedJsonRpcProvider('http://example.invalid', 1, {
+        providerId: 'p1',
+        inFlight: 2,
+        rps: 10,
+      });
+      expect(provider.isAvailable()).toBe(true);
+    });
+
+    it('returns false when semaphore is fully acquired', async () => {
+      const provider = new InstrumentedJsonRpcProvider('http://example.invalid', 1, {
+        providerId: 'p1',
+        inFlight: 1,
+      });
+      await provider.inFlightLimiter.acquire();
+      expect(provider.isAvailable()).toBe(false);
+    });
+
+    it('returns false when RPS tokens are depleted', async () => {
+      const provider = new InstrumentedJsonRpcProvider('http://example.invalid', 1, {
+        providerId: 'p1',
+        inFlight: 10,
+        rps: 1,
+        rpsBurst: 1,
+      });
+      await provider.rpsLimiter.take(1);
+      expect(provider.isAvailable()).toBe(false);
+    });
+  });
+
+  // ─── concurrency ───────────────────────────────────────────────────────────
 
   it('limits concurrency using Semaphore: second send waits until first finishes', async () => {
     let resolveFirst: ((v: any) => void) | null = null;
