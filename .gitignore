@@ -39,3 +39,7 @@ lerna-debug.log*
 .env
 
 src/sandbox.ts
+
+# Claude Code
+.claude/
+CLAUDE.md
