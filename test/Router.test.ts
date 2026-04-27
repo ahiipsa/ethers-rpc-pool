@@ -1,13 +1,31 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Router } from '../src/Router';
-import { Stats } from '../src/Stats';
+import { CooldownManager } from '../src/CooldownManager';
+import type { IAvailabilityChecker } from '../src/CooldownManager';
 import type { Endpoint } from '../src/utils';
+import type { RpcEvent } from '../src/utils';
 
 function ep(id: string): Endpoint {
   return {
     providerId: id,
     url: `http://example.invalid/${id}`,
     provider: { isAvailable: () => true } as any,
+  };
+}
+
+function rateLimitErrorEvent(providerId: string): Extract<RpcEvent, { type: 'error' }> {
+  return {
+    type: 'error',
+    chainId: 1n,
+    providerId,
+    method: 'eth_blockNumber',
+    startedAt: 0,
+    endedAt: 1,
+    ms: 1,
+    isRateLimit: true,
+    isTimeout: false,
+    retryAfterMs: 60_000,
+    message: 'rate limit',
   };
 }
 
@@ -18,9 +36,9 @@ describe('RpcRouter', () => {
   });
 
   it('pick() round-robins across endpoints when no cooldown', () => {
-    const stats = new Stats();
+    const availability: IAvailabilityChecker = { isInCooldown: () => false };
     const endpoints = [ep('a'), ep('b'), ep('c')];
-    const router = new Router(endpoints, stats);
+    const router = new Router(endpoints, availability);
 
     const picked = [
       router.pick().providerId,
@@ -37,16 +55,15 @@ describe('RpcRouter', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
 
-    const stats = new Stats();
+    const cooldown = new CooldownManager();
     const endpoints = [ep('a'), ep('b'), ep('c')];
-    const router = new Router(endpoints, stats);
+    const router = new Router(endpoints, cooldown);
 
-    //  let's put "b" in cooldown for 60 seconds
-    stats.setCooldown('b', 60_000);
+    cooldown.onEvent(rateLimitErrorEvent('b'));
 
     const picked = [
       router.pick().providerId, // a
-      router.pick().providerId, // b is cooldown => should become c
+      router.pick().providerId, // b is in cooldown => should become c
       router.pick().providerId, // then a again (round-robin continues)
       router.pick().providerId, // then c again (since b is skipped)
     ];
@@ -58,15 +75,14 @@ describe('RpcRouter', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
 
-    const stats = new Stats();
+    const cooldown = new CooldownManager();
     const endpoints = [ep('a'), ep('b'), ep('c')];
-    const router = new Router(endpoints, stats);
+    const router = new Router(endpoints, cooldown);
 
-    stats.setCooldown('a', 60_000);
-    stats.setCooldown('b', 60_000);
-    stats.setCooldown('c', 60_000);
+    cooldown.onEvent(rateLimitErrorEvent('a'));
+    cooldown.onEvent(rateLimitErrorEvent('b'));
+    cooldown.onEvent(rateLimitErrorEvent('c'));
 
-    // according to the code: if all are in cooldown, it will return endpoints[(rr++ % n)]
     const picked = [
       router.pick().providerId,
       router.pick().providerId,

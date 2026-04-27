@@ -301,10 +301,10 @@ const poolProvider = new RPCPoolProvider({
 
 ### Stats Snapshot
 
-`getStats().snapshot()` returns a point-in-time copy of all counters:
+`getSnapshot()` returns a point-in-time copy of all counters:
 
 ```ts
-const snapshot = pool.getStats().snapshot();
+const snapshot = pool.getSnapshot();
 ```
 
 | Field                    | Description                                             |

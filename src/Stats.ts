@@ -1,6 +1,4 @@
-export interface IRouterStats {
-  isInCooldown(id: string): boolean;
-}
+import { RpcEvent } from './utils';
 
 export interface RpcStatsSnapshot {
   total: number;
@@ -14,14 +12,15 @@ export interface RpcStatsSnapshot {
   providerCooldownUntil: Record<string, number>;
   perProviderInFlight: Record<string, number>;
   perProviderError: Record<string, number>;
-
   rpcErrorTotal: number;
   perProviderRpcError: Record<string, Record<string, number>>;
   perMethodRpcError: Record<string, number>;
   perProviderMethod: Record<string, Record<string, number>>;
 }
 
-export class Stats implements IRouterStats {
+type MetricsSnapshot = Omit<RpcStatsSnapshot, 'providerCooldownUntil'>;
+
+export class Stats {
   private _total = 0;
   private _inFlight = 0;
 
@@ -40,8 +39,6 @@ export class Stats implements IRouterStats {
   private _perProviderRpcError: Record<string, Record<string, number>> = {};
   private _perMethodRpcError: Record<string, number> = {};
 
-  private _providerCooldownUntil: Record<string, number> = {};
-
   private _bump(map: Record<string, number>, key: string) {
     map[key] = (map[key] || 0) + 1;
   }
@@ -50,70 +47,38 @@ export class Stats implements IRouterStats {
     map[key] = Math.max((map[key] || 0) - 1, 0);
   }
 
-  private _bumpTotal() {
-    this._total++;
-  }
+  onEvent(e: RpcEvent): void {
+    const id = e.providerId;
 
-  private _bumpInFlight() {
-    this._inFlight++;
-  }
-
-  private _bumpRateLimitedTotal() {
-    this._rateLimitedTotal++;
-  }
-
-  private _bumpTimeoutTotal() {
-    this._timeoutTotal++;
-  }
-
-  private _bumpRpcErrorTotal() {
-    this._rpcErrorTotal++;
-  }
-
-  bumpInFlightPerProvider(id: string) {
-    this._bumpInFlight();
-    this._bump(this._perProviderInFlight, id);
-  }
-
-  decreaseInFlightPerProvider(id: string) {
-    this.decreaseInFlight();
-    this._decrease(this._perProviderInFlight, id);
-  }
-
-  decreaseInFlight() {
-    this._inFlight = Math.max(this._inFlight - 1, 0);
-  }
-
-  bumpPerMethod(id: string, method: string) {
-    this._bump(this._perMethod, method);
-    if (!this._perProviderMethod[id]) {
-      this._perProviderMethod[id] = {};
+    if (e.type === 'request') {
+      this._inFlight++;
+      this._bump(this._perProviderInFlight, id);
+      this._total++;
+      this._perProviderTotal[id] = (this._perProviderTotal[id] || 0) + 1;
+      this._bump(this._perMethod, e.method);
+      if (!this._perProviderMethod[id]) this._perProviderMethod[id] = {};
+      this._bump(this._perProviderMethod[id], e.method);
+      return;
     }
-    this._bump(this._perProviderMethod[id], method);
+
+    this._inFlight = Math.max(this._inFlight - 1, 0);
+    this._decrease(this._perProviderInFlight, id);
+
+    if (e.type === 'error') {
+      if (e.isRateLimit) {
+        this._rateLimitedTotal++;
+        this._bump(this._perProviderRateLimited, id);
+      } else if (e.isTimeout) {
+        this._timeoutTotal++;
+        this._bump(this._perProviderTimeout, id);
+      } else if (e.status !== undefined && e.status >= 500) {
+        this._bump(this._perProviderError, id);
+      }
+    }
   }
 
-  bumpRateLimitedPerProvider(id: string) {
-    this._bumpRateLimitedTotal();
-    this._bump(this._perProviderRateLimited, id);
-  }
-
-  bumpTimeoutPerProvider(id: string) {
-    this._bumpTimeoutTotal();
-    this._bump(this._perProviderTimeout, id);
-  }
-
-  bumpProviderTotal(id: string) {
-    this._bumpTotal();
-    this._perProviderTotal[id] = (this._perProviderTotal[id] || 0) + 1;
-  }
-
-  bumpServerErrorPerProvider(id: string) {
-    this._bump(this._perProviderError, id);
-  }
-
-  bumpRpcError(providerId: string, method: string) {
-    this._bumpRpcErrorTotal();
-
+  bumpRpcError(providerId: string, method: string): void {
+    this._rpcErrorTotal++;
     if (!this._perProviderRpcError[providerId]) {
       this._perProviderRpcError[providerId] = {};
     }
@@ -121,29 +86,17 @@ export class Stats implements IRouterStats {
     this._bump(this._perMethodRpcError, method);
   }
 
-  timeoutRatio(id: string) {
-    const t = this._perProviderTimeout[id] || 0;
-    const n = this._perProviderTotal[id] || 0;
-    return n ? t / n : 0;
+  removeProvider(id: string): void {
+    delete this._perProviderInFlight[id];
+    delete this._perProviderTotal[id];
+    delete this._perProviderTimeout[id];
+    delete this._perProviderRateLimited[id];
+    delete this._perProviderError[id];
+    delete this._perProviderRpcError[id];
+    delete this._perProviderMethod[id];
   }
 
-  isInCooldown(id: string) {
-    const until = this._providerCooldownUntil[id];
-    if (until === undefined) return false;
-    if (until > Date.now()) return true;
-    delete this._providerCooldownUntil[id];
-    return false;
-  }
-
-  setCooldown(id: string, ms: number) {
-    this._providerCooldownUntil[id] = Date.now() + ms;
-  }
-
-  removeProvider(id: string) {
-    delete this._providerCooldownUntil[id];
-  }
-
-  snapshot(): Readonly<RpcStatsSnapshot> {
+  snapshot(): Readonly<MetricsSnapshot> {
     return {
       total: this._total,
       inFlight: this._inFlight,
@@ -163,7 +116,6 @@ export class Stats implements IRouterStats {
       ),
       perMethodRpcError: { ...this._perMethodRpcError },
       perProviderTotal: { ...this._perProviderTotal },
-      providerCooldownUntil: { ...this._providerCooldownUntil },
     };
   }
 }

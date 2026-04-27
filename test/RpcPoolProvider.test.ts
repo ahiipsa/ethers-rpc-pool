@@ -291,19 +291,19 @@ describe('RPCPoolProvider', () => {
     it('isRateLimit error: bumps rateLimitedTotal', () => {
       const pool = mkPool();
       (pool as any)._handleTransportEvent(transportError({ isRateLimit: true }));
-      expect(pool.stats.snapshot().rateLimitedTotal).toBe(1);
+      expect(pool.getSnapshot().rateLimitedTotal).toBe(1);
     });
 
     it('isTimeout error: bumps timeoutTotal', () => {
       const pool = mkPool();
       (pool as any)._handleTransportEvent(transportError({ isTimeout: true }));
-      expect(pool.stats.snapshot().timeoutTotal).toBe(1);
+      expect(pool.getSnapshot().timeoutTotal).toBe(1);
     });
 
     it('status >= 500 error: bumps perProviderError', () => {
       const pool = mkPool();
       (pool as any)._handleTransportEvent(transportError({ status: 500 }));
-      expect(pool.stats.snapshot().perProviderError['p1']).toBe(1);
+      expect(pool.getSnapshot().perProviderError['p1']).toBe(1);
     });
 
     it('hooks.onEvent is called when hook is configured', () => {
@@ -342,7 +342,7 @@ describe('RPCPoolProvider', () => {
 
       await expect(pool.send('eth_call', [])).rejects.toThrow('execution reverted');
 
-      expect(pool.stats.snapshot().rpcErrorTotal).toBe(1);
+      expect(pool.getSnapshot().rpcErrorTotal).toBe(1);
       const rpcErrorEvent = onEvent.mock.calls.find(([e]: [any]) => e.errorKind === 'rpc');
       expect(rpcErrorEvent).toBeDefined();
       expect(rpcErrorEvent![0]).toMatchObject({
@@ -356,14 +356,17 @@ describe('RPCPoolProvider', () => {
     });
   });
 
-  it('getStats(): returns the stats instance', () => {
+  it('getSnapshot(): returns full RpcStatsSnapshot with providerCooldownUntil', () => {
     const pool = new RPCPoolProvider({
       network: 1,
       rpc: [{ url: 'http://rpc1.example' }],
       defaultRpcOptions: { inFlight: 1 },
       retry: { attempts: 1 },
     });
-    expect(pool.getStats()).toBe(pool.stats);
+    const snap = pool.getSnapshot();
+    expect(snap).toHaveProperty('total');
+    expect(snap).toHaveProperty('providerCooldownUntil');
+    expect(typeof snap.providerCooldownUntil).toBe('object');
   });
 
   it('send(): respects RPS limit by delaying requests when rate limit is reached', async () => {

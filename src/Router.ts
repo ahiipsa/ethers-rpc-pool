@@ -1,12 +1,12 @@
 import { Endpoint } from './utils';
-import { IRouterStats } from './Stats';
+import { IAvailabilityChecker } from './CooldownManager';
 
 export class Router {
   private rr = 0;
 
   constructor(
     private readonly endpoints: Endpoint[],
-    private readonly stats: IRouterStats,
+    private readonly availability: IAvailabilityChecker,
   ) {}
 
   size(): number {
@@ -19,7 +19,7 @@ export class Router {
       const i = ((this.rr++ % n) + n) % n;
       const ep = this.endpoints[i];
 
-      if (!this.stats.isInCooldown(ep.providerId) && ep.provider.isAvailable(1)) return ep;
+      if (!this.availability.isInCooldown(ep.providerId) && ep.provider.isAvailable(1)) return ep;
     }
     // if all are in cooldown, return the next one in round-robin order
     return this.endpoints[((this.rr++ % n) + n) % n];

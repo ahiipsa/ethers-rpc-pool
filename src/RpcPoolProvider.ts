@@ -1,5 +1,5 @@
 import { FetchRequest, JsonRpcProvider, Network, Networkish } from 'ethers';
-import { Stats } from './Stats';
+import { Stats, RpcStatsSnapshot } from './Stats';
 import { Endpoint, isRpcLogicalError, RpcEvent, shouldFailover } from './utils';
 import {
   InstrumentedJsonRpcProvider,
@@ -30,16 +30,16 @@ export interface RPCPoolProviderParams {
 export class RPCPoolProvider extends JsonRpcProvider {
   readonly router: Router;
   readonly params: RPCPoolProviderParams;
-  readonly stats: Stats;
-  private readonly cooldownManager: CooldownManager;
+  private readonly _stats: Stats;
+  private readonly _cooldown: CooldownManager;
 
   constructor(params: RPCPoolProviderParams) {
     const network = Network.from(params.network);
     super('http://localhost', network, { staticNetwork: network });
 
     this.params = params;
-    this.stats = new Stats();
-    this.cooldownManager = new CooldownManager(this.stats);
+    this._stats = new Stats();
+    this._cooldown = new CooldownManager();
 
     const endpoints: Endpoint[] = this.params.rpc.map((options, i) => {
       const url = typeof options.url === 'string' ? options.url : options.url.url;
@@ -55,7 +55,7 @@ export class RPCPoolProvider extends JsonRpcProvider {
       return { providerId, url, provider };
     });
 
-    this.router = new Router(endpoints, this.stats);
+    this.router = new Router(endpoints, this._cooldown);
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -97,27 +97,17 @@ export class RPCPoolProvider extends JsonRpcProvider {
     throw new Error('No RPC available');
   }
 
-  private _handleTransportEvent(e: RpcEvent): void {
-    this._aggregateStats(e);
-    this.cooldownManager.onEvent(e);
-    this.params.hooks?.onEvent?.(e);
+  getSnapshot(): Readonly<RpcStatsSnapshot> {
+    return {
+      ...this._stats.snapshot(),
+      providerCooldownUntil: this._cooldown.cooldownSnapshot(),
+    };
   }
 
-  private _aggregateStats(e: RpcEvent): void {
-    const id = e.providerId;
-    if (e.type === 'request') {
-      this.stats.bumpInFlightPerProvider(id);
-      this.stats.bumpProviderTotal(id);
-      this.stats.bumpPerMethod(id, e.method);
-    } else {
-      this.stats.decreaseInFlightPerProvider(id);
-      if (e.type === 'error') {
-        if (e.isRateLimit) this.stats.bumpRateLimitedPerProvider(id);
-        else if (e.isTimeout) this.stats.bumpTimeoutPerProvider(id);
-        else if (e.status !== undefined && e.status >= 500)
-          this.stats.bumpServerErrorPerProvider(id);
-      }
-    }
+  private _handleTransportEvent(e: RpcEvent): void {
+    this._stats.onEvent(e);
+    this._cooldown.onEvent(e);
+    this.params.hooks?.onEvent?.(e);
   }
 
   private async _sleepWithBackoff(attempt: number): Promise<void> {
@@ -130,7 +120,7 @@ export class RPCPoolProvider extends JsonRpcProvider {
   private _emitRpcLogicalError(ep: Endpoint, method: string, startedAt: number, error: any): void {
     const endedAt = Date.now();
 
-    this.stats.bumpRpcError(ep.providerId, method);
+    this._stats.bumpRpcError(ep.providerId, method);
 
     this.params.hooks?.onEvent?.({
       type: 'error',
@@ -147,9 +137,5 @@ export class RPCPoolProvider extends JsonRpcProvider {
       message: String(error?.message || error),
       errorKind: 'rpc',
     });
-  }
-
-  getStats(): Stats {
-    return this.stats;
   }
 }
