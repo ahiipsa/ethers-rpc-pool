@@ -122,11 +122,6 @@ interface RPCParameters {
   rps?: number;
   rpsBurst?: number;
 
-  // Optional instrumentation hook for provider-level events
-  stats?: Stats;
-  onEvent?: (e: RpcEvent) => void;
-  providerId: string;
-
   // Optional JsonRpcProvider options for compatibility
   // https://docs.ethers.org/v6/api/providers/jsonrpc/#JsonRpcApiProviderOptions
   batchStallTime?: number;
