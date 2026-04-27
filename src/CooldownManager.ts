@@ -4,26 +4,64 @@ export interface IAvailabilityChecker {
   isInCooldown(id: string): boolean;
 }
 
+export type CircuitState = 'closed' | 'open' | 'half-open';
+
 export class CooldownManager implements IAvailabilityChecker {
   private readonly _cooldownUntil: Record<string, number> = {};
   private readonly _lastCooldownMs: Record<string, number> = {};
   private readonly _perProviderTotal: Record<string, number> = {};
   private readonly _perProviderTimeout: Record<string, number> = {};
+  private readonly _circuitState: Record<string, CircuitState> = {};
+  private readonly _probeInFlight = new Set<string>();
 
+  // atomically claims the probe slot when entering half-open
   isInCooldown(id: string): boolean {
+    const state = this._circuitState[id];
+
+    if (!state) return false;
+
+    if (state === 'half-open') {
+      if (!this._probeInFlight.has(id)) {
+        this._probeInFlight.add(id);
+        return false;
+      }
+      return true;
+    }
+
     const until = this._cooldownUntil[id];
-    if (until === undefined) return false;
-    if (until > Date.now()) return true;
-    delete this._cooldownUntil[id];
-    return false;
+    if (until === undefined || until <= Date.now()) {
+      delete this._cooldownUntil[id];
+      this._circuitState[id] = 'half-open';
+      this._probeInFlight.add(id);
+      return false;
+    }
+
+    return true;
   }
 
-  private _setCooldown(id: string, ms: number): void {
+  private _openCircuit(id: string, ms: number): void {
     this._cooldownUntil[id] = Date.now() + ms;
+    this._circuitState[id] = 'open';
+    this._probeInFlight.delete(id);
+  }
+
+  private _openWithBackoff(id: string): void {
+    const prev = this._lastCooldownMs[id] || 0;
+    const ms = (prev ? prev * 2 : 10_000) + Math.floor(Math.random() * 1000);
+    this._lastCooldownMs[id] = ms;
+    this._openCircuit(id, ms);
   }
 
   cooldownSnapshot(): Record<string, number> {
     return { ...this._cooldownUntil };
+  }
+
+  circuitStateSnapshot(): Record<string, CircuitState> {
+    const result: Record<string, CircuitState> = {};
+    for (const [id, state] of Object.entries(this._circuitState)) {
+      result[id] = state;
+    }
+    return result;
   }
 
   removeProvider(id: string): void {
@@ -31,6 +69,8 @@ export class CooldownManager implements IAvailabilityChecker {
     delete this._lastCooldownMs[id];
     delete this._perProviderTotal[id];
     delete this._perProviderTimeout[id];
+    delete this._circuitState[id];
+    this._probeInFlight.delete(id);
   }
 
   onEvent(e: RpcEvent): void {
@@ -42,13 +82,25 @@ export class CooldownManager implements IAvailabilityChecker {
     }
 
     if (e.type === 'response') {
+      if (this._circuitState[id] === 'half-open') {
+        delete this._circuitState[id];
+        this._probeInFlight.delete(id);
+      }
       this._lastCooldownMs[id] = 0;
       return;
     }
 
-    // type === 'error'
+    if (this._circuitState[id] === 'half-open') {
+      if (e.isRateLimit) {
+        this._openCircuit(id, e.retryAfterMs ?? 10_000);
+      } else {
+        this._openWithBackoff(id);
+      }
+      return;
+    }
+
     if (e.isRateLimit) {
-      this._setCooldown(id, e.retryAfterMs ?? 10_000);
+      this._openCircuit(id, e.retryAfterMs ?? 10_000);
       return;
     }
 
@@ -61,16 +113,13 @@ export class CooldownManager implements IAvailabilityChecker {
         const baseCooldown = ratio >= 0.5 ? 600_000 : 60_000;
         const ms = (e.retryAfterMs ?? baseCooldown) + Math.floor(Math.random() * 1000);
         this._lastCooldownMs[id] = ms;
-        this._setCooldown(id, ms);
+        this._openCircuit(id, ms);
       }
       return;
     }
 
     if (e.status !== undefined && e.status >= 500) {
-      const prev = this._lastCooldownMs[id] || 0;
-      const ms = (prev * 2 || 10_000) + Math.floor(Math.random() * 1000);
-      this._lastCooldownMs[id] = ms;
-      this._setCooldown(id, ms);
+      this._openWithBackoff(id);
     }
   }
 }

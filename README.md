@@ -34,6 +34,7 @@ Designed for production backends and dApps that need:
   - [Concurrency Control](#2-concurrency-control)
   - [Rate Limiting](#3-rate-limiting)
   - [Retry Strategy](#4-retry-strategy)
+  - [Circuit Breaker](#5-circuit-breaker)
 - [Instrumentation & Metrics](#instrumentation--metrics)
   - [RpcEvent](#rpcevent)
   - [Stats Snapshot](#stats-snapshot)
@@ -66,6 +67,7 @@ ethers.js ships with a built-in `FallbackProvider`. Here is how the two compare:
 | Per-endpoint concurrency control (`inFlight`)            |       ✅        |              ❌               |
 | Respects `Retry-After` header on 429                     |       ✅        |              ❌               |
 | Graduated cooldown (rate limit / timeout / 5xx)          |       ✅        |              ❌               |
+| Circuit breaker with half-open probe                     |       ✅        |              ❌               |
 | Retries on transport errors only (not on logical errors) |       ✅        |              ❌               |
 | Structured observability events (`RpcEvent`)             |       ✅        |              ❌               |
 | Per-provider stats snapshot                              |       ✅        |              ❌               |
@@ -97,6 +99,7 @@ Several recurring problems are documented in the ethers.js issue tracker:
 - 🚦 Per-endpoint concurrency limit (`inFlight`)
 - 🔁 Retry with exponential backoff and jitter
 - ⚡ Automatic failover on retryable errors
+- 🔒 Circuit breaker with half-open probe per endpoint
 - 📊 Built-in request statistics
 - 🧩 Drop-in replacement for `JsonRpcProvider`
 
@@ -218,7 +221,7 @@ interface RpcEndpointOptions {
 
 ### 1. Routing
 
-Requests are distributed across endpoints in round-robin order. Endpoints currently in cooldown (due to rate limiting, timeouts, or server errors) are skipped. If every endpoint is in cooldown, the next one in round-robin is used anyway — the pool never deadlocks.
+Requests are distributed across endpoints in round-robin order. Endpoints in `open` cooldown or `half-open` with a probe already in flight are skipped. If every endpoint is unavailable, the next one in round-robin is used anyway — the pool never deadlocks.
 
 ### 2. Concurrency Control
 
@@ -279,6 +282,28 @@ Attempt 3 → random(0..2000ms)
 ```
 
 Retries happen only on failover-safe transport errors: **rate limit (429/402)**, **timeout (504, ETIMEDOUT)**, and **server errors (5xx)**. RPC logical errors (execution reverted, invalid params, method not supported) are not retried.
+
+### 5. Circuit Breaker
+
+Each endpoint has an independent three-state circuit breaker managed by `CooldownManager`:
+
+```
+closed ──(error threshold)──▶ open ──(cooldown expires)──▶ half-open
+  ▲                                                              │
+  └──────────────(probe success)────────────────────────────────┘
+  ▲
+  └──────────────(probe failure)────────────────────────── open (escalated cooldown)
+```
+
+| State       | Behaviour                                               |
+| ----------- | ------------------------------------------------------- |
+| `closed`    | Normal operation — all requests pass through            |
+| `open`      | Endpoint is in cooldown — router skips it               |
+| `half-open` | Cooldown expired — one probe request is allowed through |
+
+When the probe succeeds the circuit closes and traffic resumes normally. When the probe fails the circuit re-opens with an escalated cooldown (exponential backoff for 5xx/timeout; `Retry-After` for rate-limits).
+
+The current circuit state for each endpoint is included in `getSnapshot()` under `providerCircuitState`.
 
 ---
 
@@ -437,23 +462,24 @@ const pool = new RPCPoolProvider({
 const snapshot = pool.getSnapshot();
 ```
 
-| Field                    | Description                                             |
-| ------------------------ | ------------------------------------------------------- |
-| `total`                  | Total requests sent (counts each retry attempt)         |
-| `inFlight`               | Currently in-flight requests across all endpoints       |
-| `perMethodTotal`         | Request count per JSON-RPC method                       |
-| `rateLimitedTotal`       | Total 429/rate-limit errors                             |
-| `perProviderRateLimited` | Rate-limit errors per endpoint                          |
-| `timeoutTotal`           | Total timeout errors                                    |
-| `perProviderTimeout`     | Timeout errors per endpoint                             |
-| `perProviderTotal`       | Total requests per endpoint                             |
-| `perProviderInFlight`    | Currently in-flight requests per endpoint               |
-| `perProviderError`       | Transport errors (5xx, network) per endpoint            |
-| `rpcErrorTotal`          | Total RPC logical errors (revert, invalid params, etc.) |
-| `perProviderRpcError`    | RPC logical errors per endpoint, broken down by method  |
-| `perMethodRpcError`      | RPC logical errors per method                           |
-| `perProviderMethod`      | Request count per endpoint per method                   |
-| `providerCooldownUntil`  | Unix timestamp (ms) when each endpoint's cooldown ends  |
+| Field                    | Description                                                                            |
+| ------------------------ | -------------------------------------------------------------------------------------- |
+| `total`                  | Total requests sent (counts each retry attempt)                                        |
+| `inFlight`               | Currently in-flight requests across all endpoints                                      |
+| `perMethodTotal`         | Request count per JSON-RPC method                                                      |
+| `rateLimitedTotal`       | Total 429/rate-limit errors                                                            |
+| `perProviderRateLimited` | Rate-limit errors per endpoint                                                         |
+| `timeoutTotal`           | Total timeout errors                                                                   |
+| `perProviderTimeout`     | Timeout errors per endpoint                                                            |
+| `perProviderTotal`       | Total requests per endpoint                                                            |
+| `perProviderInFlight`    | Currently in-flight requests per endpoint                                              |
+| `perProviderError`       | Transport errors (5xx, network) per endpoint                                           |
+| `rpcErrorTotal`          | Total RPC logical errors (revert, invalid params, etc.)                                |
+| `perProviderRpcError`    | RPC logical errors per endpoint, broken down by method                                 |
+| `perMethodRpcError`      | RPC logical errors per method                                                          |
+| `perProviderMethod`      | Request count per endpoint per method                                                  |
+| `providerCooldownUntil`  | Unix timestamp (ms) when each endpoint's cooldown ends                                 |
+| `providerCircuitState`   | Circuit breaker state per endpoint (`'open'` or `'half-open'`; absent when `'closed'`) |
 
 ### Example output:
 
@@ -477,6 +503,7 @@ const snapshot = pool.getSnapshot();
   "perProviderRpcError": {},
   "perMethodRpcError": {},
   "providerCooldownUntil": {},
+  "providerCircuitState": {},
   "perProviderInFlight": {
     "rpc#1-chainId:1-https://eth.drpc.org": 0,
     "rpc#2-chainId:1-https://eth1.lava.build": 0,
@@ -509,7 +536,7 @@ const snapshot = pool.getSnapshot();
 
 ### Known Limitations
 
-- Cooldown is endpoint-level; there is no adaptive health scoring or circuit breaker with half-open state
+- No adaptive health scoring or latency-based routing
 - No sticky session / blockTag consistency (a retry may land on a provider with a different block height)
 - Archive, debug, and trace methods work only if the underlying RPC supports them
 
@@ -563,7 +590,7 @@ Not intended for:
 
 ## Roadmap
 
-- Circuit breaker + health scoring
+- Health scoring / adaptive latency-based routing
 - Sticky session / blockTag consistency
 - Adaptive latency-based routing
 - Singleflight request deduplication

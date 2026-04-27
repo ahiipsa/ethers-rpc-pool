@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `CooldownManager`: circuit breaker with half-open state. After a cooldown expires one probe request is allowed through; on success the circuit closes, on failure it re-opens with escalated cooldown. Any error type (rate-limit, timeout, 5xx) during a probe triggers re-open.
+- `CircuitState` type (`'closed' | 'open' | 'half-open'`) exported from the package.
+- `CooldownManager.circuitStateSnapshot()` — returns current circuit state for non-closed providers.
+- `RpcStatsSnapshot.providerCircuitState` — per-provider circuit state included in `getSnapshot()` output.
 - README: "vs FallbackProvider" comparison section with feature table and known FallbackProvider production issues.
 - README: Prometheus (`prom-client`) and OpenTelemetry (`@opentelemetry/api`) integration examples in the Instrumentation section.
 

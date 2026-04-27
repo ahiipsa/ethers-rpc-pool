@@ -1,4 +1,5 @@
 import { RpcEvent } from './utils';
+import { CircuitState } from './CooldownManager';
 
 export interface RpcStatsSnapshot {
   total: number;
@@ -10,6 +11,7 @@ export interface RpcStatsSnapshot {
   perProviderTimeout: Record<string, number>;
   perProviderTotal: Record<string, number>;
   providerCooldownUntil: Record<string, number>;
+  providerCircuitState: Record<string, CircuitState>;
   perProviderInFlight: Record<string, number>;
   perProviderError: Record<string, number>;
   rpcErrorTotal: number;
@@ -18,7 +20,7 @@ export interface RpcStatsSnapshot {
   perProviderMethod: Record<string, Record<string, number>>;
 }
 
-type MetricsSnapshot = Omit<RpcStatsSnapshot, 'providerCooldownUntil'>;
+type MetricsSnapshot = Omit<RpcStatsSnapshot, 'providerCooldownUntil' | 'providerCircuitState'>;
 
 export class Stats {
   private _total = 0;

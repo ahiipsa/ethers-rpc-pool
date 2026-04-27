@@ -23,9 +23,7 @@ export interface RPCPoolProviderParams {
   };
 }
 
-// TODO
-// -- circuit breaker + health checks
-// -- sticky "session"
+// TODO: sticky "session"
 
 export class RPCPoolProvider extends JsonRpcProvider {
   readonly router: Router;
@@ -101,6 +99,7 @@ export class RPCPoolProvider extends JsonRpcProvider {
     return {
       ...this._stats.snapshot(),
       providerCooldownUntil: this._cooldown.cooldownSnapshot(),
+      providerCircuitState: this._cooldown.circuitStateSnapshot(),
     };
   }
 

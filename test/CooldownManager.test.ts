@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { CooldownManager } from '../src/CooldownManager';
+import type { CircuitState } from '../src/CooldownManager';
 import type { RpcEvent } from '../src/utils';
 
 function requestEvent(providerId = 'p1'): RpcEvent {
@@ -255,6 +256,160 @@ describe('CooldownManager', () => {
       mgr.onEvent(requestEvent());
       mgr.onEvent(errorEvent({ isTimeout: true }));
       expect(mgr.isInCooldown('p1')).toBe(false);
+    });
+
+    it('clears circuit state from circuitStateSnapshot', () => {
+      vi.useFakeTimers();
+      const mgr = new CooldownManager();
+      mgr.onEvent(errorEvent({ isRateLimit: true, retryAfterMs: 10_000 }));
+      expect(mgr.circuitStateSnapshot()['p1']).toBe<CircuitState>('open');
+      mgr.removeProvider('p1');
+      expect(mgr.circuitStateSnapshot()['p1']).toBeUndefined();
+    });
+  });
+
+  describe('half-open (circuit breaker)', () => {
+    it('transitions open → half-open when cooldown expires', () => {
+      vi.useFakeTimers();
+      const mgr = new CooldownManager();
+      mgr.onEvent(errorEvent({ isRateLimit: true, retryAfterMs: 1_000 }));
+      expect(mgr.circuitStateSnapshot()['p1']).toBe<CircuitState>('open');
+
+      vi.advanceTimersByTime(1_001);
+      // isInCooldown triggers the transition
+      expect(mgr.isInCooldown('p1')).toBe(false);
+      expect(mgr.circuitStateSnapshot()['p1']).toBe<CircuitState>('half-open');
+    });
+
+    it('blocks subsequent callers while probe is in flight', () => {
+      vi.useFakeTimers();
+      const mgr = new CooldownManager();
+      mgr.onEvent(errorEvent({ isRateLimit: true, retryAfterMs: 1_000 }));
+      vi.advanceTimersByTime(1_001);
+
+      expect(mgr.isInCooldown('p1')).toBe(false); // probe allowed
+      expect(mgr.isInCooldown('p1')).toBe(true); // second caller blocked
+      expect(mgr.isInCooldown('p1')).toBe(true); // third caller blocked
+    });
+
+    it('transitions half-open → closed on successful probe', () => {
+      vi.useFakeTimers();
+      const mgr = new CooldownManager();
+      mgr.onEvent(errorEvent({ isRateLimit: true, retryAfterMs: 1_000 }));
+      vi.advanceTimersByTime(1_001);
+
+      mgr.isInCooldown('p1'); // reserve probe
+      mgr.onEvent(responseEvent()); // probe succeeds
+
+      expect(mgr.circuitStateSnapshot()['p1']).toBeUndefined();
+      expect(mgr.isInCooldown('p1')).toBe(false);
+    });
+
+    it('subsequent callers are not blocked after circuit closes', () => {
+      vi.useFakeTimers();
+      const mgr = new CooldownManager();
+      mgr.onEvent(errorEvent({ isRateLimit: true, retryAfterMs: 1_000 }));
+      vi.advanceTimersByTime(1_001);
+
+      mgr.isInCooldown('p1');
+      mgr.onEvent(responseEvent());
+
+      // all callers now pass freely
+      expect(mgr.isInCooldown('p1')).toBe(false);
+      expect(mgr.isInCooldown('p1')).toBe(false);
+    });
+
+    it('transitions half-open → open on 5xx probe failure with escalated cooldown', () => {
+      vi.useFakeTimers();
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      const mgr = new CooldownManager();
+      mgr.onEvent(errorEvent({ status: 500 })); // initial: 10_000
+      vi.advanceTimersByTime(10_001);
+
+      mgr.isInCooldown('p1'); // enter half-open, reserve probe
+      mgr.onEvent(errorEvent({ status: 500 })); // probe fails
+
+      expect(mgr.circuitStateSnapshot()['p1']).toBe<CircuitState>('open');
+      // escalated: prev=10_000 → 20_000
+      vi.advanceTimersByTime(20_001);
+      expect(mgr.isInCooldown('p1')).toBe(false);
+    });
+
+    it('transitions half-open → open on rate-limit probe failure', () => {
+      vi.useFakeTimers();
+      const mgr = new CooldownManager();
+      mgr.onEvent(errorEvent({ isRateLimit: true, retryAfterMs: 1_000 }));
+      vi.advanceTimersByTime(1_001);
+
+      mgr.isInCooldown('p1');
+      mgr.onEvent(errorEvent({ isRateLimit: true, retryAfterMs: 5_000 }));
+
+      expect(mgr.circuitStateSnapshot()['p1']).toBe<CircuitState>('open');
+      expect(mgr.isInCooldown('p1')).toBe(true);
+      vi.advanceTimersByTime(5_001);
+      expect(mgr.isInCooldown('p1')).toBe(false); // transitions to half-open again
+    });
+
+    it('rate-limit probe failure does not pollute 5xx exponential backoff', () => {
+      vi.useFakeTimers();
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      const mgr = new CooldownManager();
+
+      // open via 5xx: lastCooldownMs = 10_000
+      mgr.onEvent(errorEvent({ status: 500 }));
+      vi.advanceTimersByTime(10_001);
+
+      // probe fails with rate-limit (retryAfterMs = 30_000)
+      mgr.isInCooldown('p1');
+      mgr.onEvent(errorEvent({ isRateLimit: true, retryAfterMs: 30_000 }));
+      vi.advanceTimersByTime(30_001);
+
+      // next probe: should use lastCooldownMs=10_000 → 20_000, not 30_000 → 60_000
+      mgr.isInCooldown('p1');
+      mgr.onEvent(errorEvent({ status: 500 }));
+      expect(mgr.cooldownSnapshot()['p1']).toBe(Date.now() + 20_000);
+    });
+
+    it('transitions half-open → open on timeout probe failure', () => {
+      vi.useFakeTimers();
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      const mgr = new CooldownManager();
+      mgr.onEvent(errorEvent({ isRateLimit: true, retryAfterMs: 1_000 }));
+      vi.advanceTimersByTime(1_001);
+
+      mgr.isInCooldown('p1');
+      mgr.onEvent(errorEvent({ isTimeout: true }));
+
+      expect(mgr.circuitStateSnapshot()['p1']).toBe<CircuitState>('open');
+      // no prior lastCooldownMs → 10_000
+      vi.advanceTimersByTime(10_001);
+      expect(mgr.isInCooldown('p1')).toBe(false);
+    });
+
+    it('resets lastCooldownMs on circuit close — next open starts fresh at 10s', () => {
+      vi.useFakeTimers();
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      const mgr = new CooldownManager();
+
+      // first open/close cycle
+      mgr.onEvent(errorEvent({ status: 500 })); // 10_000
+      vi.advanceTimersByTime(10_001);
+      mgr.isInCooldown('p1');
+      mgr.onEvent(responseEvent()); // close — resets lastCooldownMs
+
+      // second 5xx: should start at 10_000 again, not 20_000
+      mgr.onEvent(errorEvent({ status: 500 }));
+      const snap = mgr.cooldownSnapshot()['p1'];
+      expect(snap).toBe(Date.now() + 10_000);
+    });
+
+    it('circuitStateSnapshot returns half-open entry', () => {
+      vi.useFakeTimers();
+      const mgr = new CooldownManager();
+      mgr.onEvent(errorEvent({ isRateLimit: true, retryAfterMs: 500 }));
+      vi.advanceTimersByTime(501);
+      mgr.isInCooldown('p1');
+      expect(mgr.circuitStateSnapshot()).toEqual({ p1: 'half-open' });
     });
   });
 });
