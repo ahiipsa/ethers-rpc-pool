@@ -77,6 +77,7 @@ export class Router {
       cumulative += entry.weight;
       if (slot < cumulative) return entry;
     }
+    /* v8 ignore next -- unreachable: slot = rr % totalWeight is always within range */
     return entries[entries.length - 1];
   }
 }

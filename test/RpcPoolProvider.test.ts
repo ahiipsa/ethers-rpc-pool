@@ -321,6 +321,32 @@ describe('RPCPoolProvider', () => {
   });
 
   describe('send() with RPC logical error', () => {
+    it('RPC error without .message: event.message falls back to String(error)', async () => {
+      const onEvent = vi.fn();
+      // plain object satisfies isRpcLogicalError (has error.code) but has no .message
+      const rpcErr: any = { error: { code: -32000 } };
+
+      const ep1 = mkEndpoint('p1', async () => {
+        throw rpcErr;
+      });
+      const pool = new RPCPoolProvider({
+        network: 1,
+        rpc: [{ url: 'http://rpc1.example' }],
+        defaultRpcOptions: { inFlight: 1 },
+        retry: { attempts: 1 },
+        hooks: { onEvent },
+      });
+
+      vi.spyOn(pool.router, 'pick').mockReturnValue(ep1);
+      vi.spyOn(pool.router, 'size').mockReturnValue(1);
+
+      await expect(pool.send('eth_call', [])).rejects.toEqual(rpcErr);
+
+      const rpcErrorEvent = onEvent.mock.calls.find(([e]: [any]) => e.errorKind === 'rpc');
+      expect(rpcErrorEvent).toBeDefined();
+      expect(rpcErrorEvent![0].message).toBe(String(rpcErr));
+    });
+
     it('calls bumpRpcError and fires hook with errorKind=rpc', async () => {
       const onEvent = vi.fn();
       const rpcErr: any = new Error('execution reverted');

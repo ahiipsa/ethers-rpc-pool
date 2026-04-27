@@ -102,6 +102,7 @@ Several recurring problems are documented in the ethers.js issue tracker:
 - 🔒 Circuit breaker with half-open probe per endpoint
 - 📊 Built-in request statistics
 - 🧩 Drop-in replacement for `JsonRpcProvider`
+- ✅ 100 % test coverage (lines, statements, functions)
 
 ---
 

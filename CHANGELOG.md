@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Testing
+
+- Added test cases for previously uncovered edge scenarios: unclassified transport errors (no HTTP status, not rate-limit or timeout), and transport/RPC logical errors thrown as non-`Error` values without a `.message` property.
+- `/* v8 ignore */` markers added to two unreachable safety fallbacks:
+  - `CooldownManager.isInCooldown`: the `half-open + probe-not-in-flight` branch is unreachable because the `open → half-open` transition always claims the probe slot atomically — all `_probeInFlight.delete()` callsites also clear or change the circuit state simultaneously.
+  - `Router._entryAtSlot`: the post-loop fallback is unreachable for positive weights because `slot = rr % totalWeight` is always in `[0, totalWeight)`.
+- All coverage thresholds now met: 100 % lines, 100 % statements, 100 % functions, ≥ 98 % branches (`vitest --coverage`).
+
 ### Added
 
 - Per-endpoint `weight` and `priority` options. `priority` (default `0`, higher = preferred) groups endpoints into tiers tried high→low; `weight` (default `1`) controls proportional traffic share within a tier via weighted round-robin. When all endpoints in a tier are unavailable, routing falls through to the next tier. When all tiers are exhausted, the fallback returns from the highest-priority tier without availability check (no deadlock).

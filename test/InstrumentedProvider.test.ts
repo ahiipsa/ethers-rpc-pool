@@ -157,6 +157,26 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
     }
   });
 
+  it('error without .message property: event.message falls back to String(error)', async () => {
+    // throw a plain string — e?.message is undefined, so String(e?.message || e) uses String(e)
+    vi.spyOn(JsonRpcProvider.prototype, '_send').mockRejectedValue('network error');
+
+    const events: RpcEvent[] = [];
+    const provider = new InstrumentedJsonRpcProvider('http://example.invalid', 1, {
+      providerId: 'p1',
+      onEvent: (e) => events.push(e),
+    });
+
+    await expect(provider.send('eth_blockNumber', [])).rejects.toBe('network error');
+
+    const errorEvent = events.find((e) => e.type === 'error');
+    expect(errorEvent?.type).toBe('error');
+    if (errorEvent?.type === 'error') {
+      expect(errorEvent.message).toBe('network error');
+      expect(errorEvent.errorKind).toBe('transport');
+    }
+  });
+
   it('batch payload: emits one request+response event per payload', async () => {
     vi.spyOn(JsonRpcProvider.prototype, '_send').mockResolvedValue([
       { id: 1, result: 'r1' },

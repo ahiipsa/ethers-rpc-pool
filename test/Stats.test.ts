@@ -133,6 +133,20 @@ describe('Stats', () => {
     });
   });
 
+  describe('onEvent — error: unclassified (no HTTP status)', () => {
+    it('does not bump any error counter for connection-level errors without HTTP status', () => {
+      stats.onEvent(requestEvent('p1'));
+      stats.onEvent(errorEvent('p1')); // isRateLimit=false, isTimeout=false, status=undefined
+
+      const s = stats.snapshot();
+      expect(s.rateLimitedTotal).toBe(0);
+      expect(s.timeoutTotal).toBe(0);
+      expect(s.perProviderRateLimited['p1']).toBeUndefined();
+      expect(s.perProviderTimeout['p1']).toBeUndefined();
+      expect(s.perProviderError['p1']).toBeUndefined();
+    });
+  });
+
   describe('bumpRpcError', () => {
     it('increments rpcErrorTotal, perProviderRpcError, and perMethodRpcError', () => {
       stats.bumpRpcError('p1', 'eth_call');

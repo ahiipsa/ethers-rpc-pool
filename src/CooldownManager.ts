@@ -21,10 +21,13 @@ export class CooldownManager implements IAvailabilityChecker {
     if (!state) return false;
 
     if (state === 'half-open') {
+      /* v8 ignore start */
       if (!this._probeInFlight.has(id)) {
+        // unreachable: open→half-open transition always claims the probe slot atomically
         this._probeInFlight.add(id);
         return false;
       }
+      /* v8 ignore stop */
       return true;
     }
 
