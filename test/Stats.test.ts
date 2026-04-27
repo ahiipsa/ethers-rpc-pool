@@ -195,6 +195,20 @@ describe('Stats', () => {
       expect(stats.snapshot().perMethodTotal['eth_call']).toBe(1);
     });
 
+    it('deep-copies perProviderMethod — nested mutation does not affect internal state', () => {
+      stats.bumpPerMethod('p1', 'eth_call');
+      const s = stats.snapshot();
+      (s.perProviderMethod as Record<string, Record<string, number>>)['p1']['eth_call'] = 999;
+      expect(stats.snapshot().perProviderMethod['p1']['eth_call']).toBe(1);
+    });
+
+    it('deep-copies perProviderRpcError — nested mutation does not affect internal state', () => {
+      stats.bumpRpcError('p1', 'eth_call');
+      const s = stats.snapshot();
+      (s.perProviderRpcError as Record<string, Record<string, number>>)['p1']['eth_call'] = 999;
+      expect(stats.snapshot().perProviderRpcError['p1']['eth_call']).toBe(1);
+    });
+
     it('returns zero-values when stats are empty', () => {
       const s = stats.snapshot();
       expect(s.total).toBe(0);

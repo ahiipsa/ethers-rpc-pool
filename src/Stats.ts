@@ -143,12 +143,16 @@ export class Stats implements IRouterStats {
       rateLimitedTotal: this._rateLimitedTotal,
       timeoutTotal: this._timeoutTotal,
       rpcErrorTotal: this._rpcErrorTotal,
-      perProviderMethod: { ...this._perProviderMethod },
+      perProviderMethod: Object.fromEntries(
+        Object.entries(this._perProviderMethod).map(([k, v]) => [k, { ...v }]),
+      ),
       perProviderInFlight: { ...this._perProviderInFlight },
       perProviderRateLimited: { ...this._perProviderRateLimited },
       perProviderTimeout: { ...this._perProviderTimeout },
       perProviderError: { ...this._perProviderError },
-      perProviderRpcError: { ...this._perProviderRpcError },
+      perProviderRpcError: Object.fromEntries(
+        Object.entries(this._perProviderRpcError).map(([k, v]) => [k, { ...v }]),
+      ),
       perMethodRpcError: { ...this._perMethodRpcError },
       perProviderTotal: { ...this._perProviderTotal },
       providerCooldownUntil: { ...this._providerCooldownUntil },
