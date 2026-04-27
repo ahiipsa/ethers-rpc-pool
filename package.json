@@ -9,7 +9,15 @@
     "ethers",
     "load-balancer",
     "evm",
-    "failover"
+    "failover",
+    "rpc-pool",
+    "json-rpc",
+    "rate-limit",
+    "web3",
+    "provider",
+    "blockchain",
+    "fallback",
+    "concurrency"
   ],
   "engines": {
     "node": ">=18"
