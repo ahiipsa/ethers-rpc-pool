@@ -117,6 +117,58 @@ describe('RpsLimiter', () => {
     expect(done).toBe(true);
   });
 
+  it('queues multiple concurrent waiters and resolves them in order', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+    const limiter = new RpsLimiter(2, 2); // 2 rps, burst=2
+
+    // drain the bucket
+    await limiter.take(2);
+
+    const results: number[] = [];
+    const p1 = limiter.take(1).then(() => results.push(1));
+    const p2 = limiter.take(1).then(() => results.push(2));
+    const p3 = limiter.take(1).then(() => results.push(3));
+
+    await flushMicrotasks();
+    expect(results).toEqual([]);
+
+    // 500ms: 1 token accumulated at 2 rps → caller 1 resolves
+    await vi.advanceTimersByTimeAsync(500);
+    await flushMicrotasks();
+    expect(results).toEqual([1]);
+
+    // 1000ms total: caller 2 resolves
+    await vi.advanceTimersByTimeAsync(500);
+    await flushMicrotasks();
+    expect(results).toEqual([1, 2]);
+
+    // 1500ms total: caller 3 resolves
+    await vi.advanceTimersByTimeAsync(500);
+    await Promise.all([p1, p2, p3]);
+    expect(results).toEqual([1, 2, 3]);
+  });
+
+  it('uses exactly one setTimeout per queued waiter (no busy-loop)', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+    const limiter = new RpsLimiter(2, 2);
+    await limiter.take(2); // drain
+
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+
+    const p1 = limiter.take(1);
+    const p2 = limiter.take(1);
+
+    await vi.advanceTimersByTimeAsync(1100);
+    await Promise.all([p1, p2]);
+
+    // One setTimeout per waiter, not a polling loop
+    expect(setTimeoutSpy).toHaveBeenCalledTimes(2);
+  });
+
   it('does not accumulate above burst (refill is capped)', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));

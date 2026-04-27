@@ -45,33 +45,19 @@ export class RpsLimiter {
   }
 
   // Take count tokens (usually 1 request = 1 token).
-  // If not enough tokens — wait and try again.
+  // If not enough tokens — enqueue exactly one setTimeout for the precise wake-up time.
+  // tokens may go negative (debt); each caller's wait time is derived from that debt.
   async take(count = 1): Promise<void> {
     if (!this.rps || this.rps <= 0) return;
 
-    while (true) {
-      const now = Date.now();
+    const now = Date.now();
+    this.refill(now);
+    this.tokens -= count;
 
-      // Before attempting — refill tokens
-      this.refill(now);
+    if (this.tokens >= 0) return;
 
-      // If enough tokens — "pay" for the request and exit
-      if (this.tokens >= count) {
-        this.tokens -= count;
-        return;
-      }
-
-      // Not enough tokens: calculate how long to wait
-      const need = count - this.tokens;
-
-      // How many ms needed to accumulate need tokens:
-      // need / rps = seconds, *1000 = ms
-      const waitMs = Math.ceil((need / this.rps) * 1000);
-
-      // Wait in chunks (not all waitMs at once), to:
-      // - not sleep too long if time/state changed
-      // - be more resilient to timer drift
-      await new Promise((r) => setTimeout(r, Math.min(waitMs, 50)));
-    }
+    // tokens is negative: we owe (-tokens) tokens that will accumulate at rps tokens/sec
+    const waitMs = Math.ceil((-this.tokens / this.rps) * 1000);
+    return new Promise((resolve) => setTimeout(resolve, waitMs));
   }
 }
