@@ -23,18 +23,18 @@ Designed for production backends and dApps that need:
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
-- - [Interfaces](#interfaces)
-- - [RPCPoolProvider Options](#rpcpoolprovider-options)
-- - [JsonRpcProvider Options](#jsonrpcprovider-options)
+  - [Interfaces](#interfaces)
+  - [RPCPoolProvider Options](#rpcpoolprovider-options)
+  - [Per-Endpoint Options](#per-endpoint-options)
 - [How It Works](#how-it-works)
-- - [Routing](#1-routing)
-- - [Concurrency Control](#2-concurrency-control)
-- - [Rate Limiting](#3-rate-limiting)
-- - [Retry Strategy](#4-retry-strategy)
+  - [Routing](#1-routing)
+  - [Concurrency Control](#2-concurrency-control)
+  - [Rate Limiting](#3-rate-limiting)
+  - [Retry Strategy](#4-retry-strategy)
 - [Instrumentation & Metrics](#instrumentation--metrics)
 - [Production Considerations](#production-considerations)
-- - [Recommended Settings](#recommended-settings)
-- - [Known Limitations](#known-limitations)
+  - [Recommended Settings](#recommended-settings)
+  - [Known Limitations](#known-limitations)
 - [When To Use](#when-to-use)
 - [Example Architecture](#example-architecture)
 - [Roadmap](#roadmap)
@@ -43,20 +43,9 @@ Designed for production backends and dApps that need:
 
 ## Why ethers-rpc-pool?
 
-Most production apps rely on a single RPC provider. This creates:
+Most production apps rely on a single RPC provider. This creates a single point of failure, hard concurrency limits, and cascading retry storms during traffic spikes.
 
-- Single point of failure
-- Hard concurrency limits (RPS / in-flight)
-- Increased timeout risk during traffic spikes
-- Cascading retry storms
-
-`ethers-rpc-pool` solves this by introducing:
-
-- Multi-provider routing
-- Per-endpoint concurrency limiting
-- Intelligent failover
-- Retry with exponential backoff + jitter
-- Built-in request instrumentation
+`ethers-rpc-pool` distributes traffic across multiple endpoints, applies per-endpoint rate limiting and concurrency control, and automatically fails over to healthy providers — all behind the familiar `JsonRpcProvider` API.
 
 ---
 
@@ -98,13 +87,15 @@ const poolProvider = new RPCPoolProvider({
     { url: 'https://eth1.lava.build' },
     { url: 'https://rpc.mevblocker.io' },
     { url: 'https://eth.blockrazor.xyz' },
-    { url: 'https://public-eth.nownodes.io' },
+    // Override defaults for a specific endpoint:
+    { url: 'https://public-eth.nownodes.io', rps: 5, inFlight: 2 },
   ],
+  // Applied to every endpoint unless overridden per-item above:
   defaultRpcOptions: { inFlight: 1, timeout: 3000, rps: 2, rpsBurst: 5 },
   retry: { attempts: 3 },
 });
 
-// Use it like a regular `JsonRpcProvider`:
+// Drop-in replacement for JsonRpcProvider:
 const blockNumber = await poolProvider.getBlockNumber();
 const balance = await poolProvider.getBalance('0x...');
 ```
@@ -116,13 +107,37 @@ const balance = await poolProvider.getBalance('0x...');
 ### Interfaces
 
 ```ts
-interface RPCParameters {
+interface RPCPoolProviderParams {
+  network: Networkish; // chain ID number, name string, or ethers Network object
+  rpc: RpcEndpointOptions[]; // list of RPC endpoints
+  defaultRpcOptions: {
+    inFlight: number; // required; other fields are optional
+    timeout?: number;
+    rps?: number;
+    rpsBurst?: number;
+  };
+  retry: {
+    attempts: number; // max number of unique endpoints to try
+  };
+  hooks?: {
+    onEvent(e: RpcEvent): void;
+  };
+}
+```
+
+```ts
+// Options for a single RPC endpoint.
+// Per-endpoint values override defaultRpcOptions.
+interface RpcEndpointOptions {
+  url: string | FetchRequest; // endpoint URL
+
+  // ethers-rpc-pool options (all optional; fall back to defaultRpcOptions):
   inFlight?: number;
   timeout?: number;
   rps?: number;
   rpsBurst?: number;
 
-  // Optional JsonRpcProvider options for compatibility
+  // Optional ethers.js JsonRpcApiProviderOptions:
   // https://docs.ethers.org/v6/api/providers/jsonrpc/#JsonRpcApiProviderOptions
   batchStallTime?: number;
   batchMaxSize?: number;
@@ -134,39 +149,26 @@ interface RPCParameters {
 }
 ```
 
-```ts
-interface RPCPoolProviderParams {
-  network: Networkish;
-  rpc: RPCPoolProviderOptions[];
-  defaultRpcOptions: { inFlight: number; timeout?: number; rps?: number; rpsBurst?: number };
-  retry: {
-    attempts: number;
-  };
-  hooks?: {
-    onEvent(e: RpcEvent): void;
-  };
-}
-```
-
 ### RPCPoolProvider Options
 
 | Option              | Description                                                                               |
 | ------------------- | ----------------------------------------------------------------------------------------- |
 | `network`           | Chain identifier (`Networkish`: chain ID number, name string, or ethers `Network` object) |
-| `rpc`               | List of RPC endpoints                                                                     |
-| `retry.attempts`    | Maximum number of unique endpoints to try                                                 |
-| `defaultRpcOptions` | Default options for all RPC endpoints                                                     |
-| `hooks.onEvent`     | Optional instrumentation hook                                                             |
+| `rpc`               | List of RPC endpoints (see `RpcEndpointOptions` above)                                    |
+| `retry.attempts`    | Maximum number of unique endpoints to try before giving up                                |
+| `defaultRpcOptions` | Default options applied to every endpoint; per-endpoint values override these             |
+| `hooks.onEvent`     | Optional callback fired on every request, response, and error (see `RpcEvent` below)      |
 
-### JsonRpcProvider Options
+### Per-Endpoint Options
 
-| Option     | Description                                                                                                                                  |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `inFlight` | Max concurrent requests per endpoint                                                                                                         |
-| `timeout`  | Timeout in ms for each request to this URL, default 10s                                                                                      |
-| `rps`      | Maximum number of requests per second allowed for a single RPC endpoint. Enforced using a token bucket rate limiter.                         |
-| `rpsBurst` | Maximum burst capacity for the rate limiter. Allows short spikes above the sustained rate by accumulating tokens during idle periods.        |
-| ...        | Also allows customization of [ethers.JsonRpcApiProviderOptions](https://docs.ethers.org/v6/api/providers/jsonrpc/#JsonRpcApiProviderOptions) |
+| Option     | Default | Description                                                                                                                            |
+| ---------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`      | —       | RPC endpoint URL (required)                                                                                                            |
+| `inFlight` | `1`     | Max concurrent in-flight requests                                                                                                      |
+| `timeout`  | `10000` | HTTP timeout in ms                                                                                                                     |
+| `rps`      | `10`    | Sustained request rate (requests/sec). Enforced by a token bucket.                                                                     |
+| `rpsBurst` | `= rps` | Burst capacity. Allows short spikes above `rps` by consuming tokens accumulated during idle time.                                      |
+| `...`      | —       | Any [ethers.JsonRpcApiProviderOptions](https://docs.ethers.org/v6/api/providers/jsonrpc/#JsonRpcApiProviderOptions) are also accepted. |
 
 ---
 
@@ -174,7 +176,7 @@ interface RPCPoolProviderParams {
 
 ### 1. Routing
 
-Requests are routed through an internal `Router`, which selects an available endpoint.
+Requests are distributed across endpoints in round-robin order. Endpoints currently in cooldown (due to rate limiting, timeouts, or server errors) are skipped. If every endpoint is in cooldown, the next one in round-robin is used anyway — the pool never deadlocks.
 
 ### 2. Concurrency Control
 
@@ -234,37 +236,92 @@ Attempt 3 → random(0..2000ms)
 ...
 ```
 
-Retries only happen on errors considered failover-safe.
+Retries happen only on failover-safe transport errors: **rate limit (429/402)**, **timeout (504, ETIMEDOUT)**, and **server errors (5xx)**. RPC logical errors (execution reverted, invalid params, method not supported) are not retried.
 
 ---
 
 ## Instrumentation & Metrics
 
-You can subscribe to RPC lifecycle events:
+### RpcEvent
 
-```typescript
+Every request, successful response, and error fires an `RpcEvent` through the optional `hooks.onEvent` callback:
+
+```ts
+type RpcEvent =
+  | {
+      type: 'request';
+      chainId: bigint;
+      providerId: string; // e.g. "rpc#1-chainId:1-https://eth.drpc.org"
+      method: string; // e.g. "eth_blockNumber"
+      startedAt: number; // Unix timestamp (ms)
+    }
+  | {
+      type: 'response';
+      chainId: bigint;
+      providerId: string;
+      method: string;
+      startedAt: number;
+      endedAt: number;
+      ms: number; // round-trip time in ms
+    }
+  | {
+      type: 'error';
+      chainId: bigint;
+      providerId: string;
+      method: string;
+      startedAt: number;
+      endedAt: number;
+      ms: number;
+      isRateLimit: boolean;
+      isTimeout: boolean;
+      status?: number; // HTTP status code if available
+      retryAfterMs?: number; // from Retry-After header
+      code?: string; // ethers error code
+      message: string;
+      errorKind?: 'transport' | 'rpc';
+    };
+```
+
+Use `hooks.onEvent` to feed events into Prometheus, OpenTelemetry, or custom logging:
+
+```ts
 const poolProvider = new RPCPoolProvider({
   // ...
   hooks: {
     onEvent(event) {
-      console.log(event);
+      if (event.type === 'error' && event.isRateLimit) {
+        rateLimitCounter.inc({ provider: event.providerId });
+      }
     },
   },
 });
 ```
 
-This allows integration with:
+### Stats Snapshot
 
-- Prometheus
-- OpenTelemetry
-- Custom logging pipelines
-
-### Access Stats Snapshot
+`getStats().snapshot()` returns a point-in-time copy of all counters:
 
 ```ts
-const stats = pool.getStats();
-console.log(stats.snapshot());
+const snapshot = pool.getStats().snapshot();
 ```
+
+| Field                    | Description                                             |
+| ------------------------ | ------------------------------------------------------- |
+| `total`                  | Total requests sent (counts each retry attempt)         |
+| `inFlight`               | Currently in-flight requests across all endpoints       |
+| `perMethodTotal`         | Request count per JSON-RPC method                       |
+| `rateLimitedTotal`       | Total 429/rate-limit errors                             |
+| `perProviderRateLimited` | Rate-limit errors per endpoint                          |
+| `timeoutTotal`           | Total timeout errors                                    |
+| `perProviderTimeout`     | Timeout errors per endpoint                             |
+| `perProviderTotal`       | Total requests per endpoint                             |
+| `perProviderInFlight`    | Currently in-flight requests per endpoint               |
+| `perProviderError`       | Transport errors (5xx, network) per endpoint            |
+| `rpcErrorTotal`          | Total RPC logical errors (revert, invalid params, etc.) |
+| `perProviderRpcError`    | RPC logical errors per endpoint, broken down by method  |
+| `perMethodRpcError`      | RPC logical errors per method                           |
+| `perProviderMethod`      | Request count per endpoint per method                   |
+| `providerCooldownUntil`  | Unix timestamp (ms) when each endpoint's cooldown ends  |
 
 ### Example output:
 
@@ -308,14 +365,6 @@ console.log(stats.snapshot());
 }
 ```
 
-Useful for:
-
-- Request counters
-- Per-method stats
-- Per-provider metrics
-- Timeout tracking
-- Rate limit detection
-
 ---
 
 ## Production Considerations
@@ -328,9 +377,9 @@ Useful for:
 
 ### Known Limitations
 
-- Basic circuit breaker/cooldown
-- No sticky session/blockTag consistency yet
-- Archive/debug/trace methods depend on underlying RPC support
+- Cooldown is endpoint-level; there is no adaptive health scoring or circuit breaker with half-open state
+- No sticky session / blockTag consistency (a retry may land on a provider with a different block height)
+- Archive, debug, and trace methods work only if the underlying RPC supports them
 
 ---
 
