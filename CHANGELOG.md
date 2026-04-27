@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- README: "vs FallbackProvider" comparison section with feature table and known FallbackProvider production issues.
+- README: Prometheus (`prom-client`) and OpenTelemetry (`@opentelemetry/api`) integration examples in the Instrumentation section.
+
 ### Changed
 
 - **`CooldownManager` now owns cooldown state** — `_cooldownUntil` and related per-provider tracking have moved from `Stats` into `CooldownManager`. The class no longer receives an external `ICooldownSetter`; it manages the state internally and exposes `isInCooldown(id)`, `cooldownSnapshot()`, and `removeProvider(id)`.

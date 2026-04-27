@@ -20,6 +20,7 @@ Designed for production backends and dApps that need:
 ## Table of Contents
 
 - [Why ethers-rpc-pool](#why-ethers-rpc-pool)
+- [vs FallbackProvider](#vs-fallbackprovider)
 - [Features](#features)
 - [Requirements](#requirements)
 - [Installation](#installation)
@@ -34,6 +35,10 @@ Designed for production backends and dApps that need:
   - [Rate Limiting](#3-rate-limiting)
   - [Retry Strategy](#4-retry-strategy)
 - [Instrumentation & Metrics](#instrumentation--metrics)
+  - [RpcEvent](#rpcevent)
+  - [Stats Snapshot](#stats-snapshot)
+  - [Prometheus Example](#prometheus-example)
+  - [OpenTelemetry Example](#opentelemetry-example)
 - [Production Considerations](#production-considerations)
   - [Recommended Settings](#recommended-settings)
   - [Known Limitations](#known-limitations)
@@ -48,6 +53,41 @@ Designed for production backends and dApps that need:
 Most production apps rely on a single RPC provider. This creates a single point of failure, hard concurrency limits, and cascading retry storms during traffic spikes.
 
 `ethers-rpc-pool` distributes traffic across multiple endpoints, applies per-endpoint rate limiting and concurrency control, and automatically fails over to healthy providers — all behind the familiar `JsonRpcProvider` API.
+
+---
+
+## vs FallbackProvider
+
+ethers.js ships with a built-in `FallbackProvider`. Here is how the two compare:
+
+| Capability                                               | ethers-rpc-pool |       FallbackProvider        |
+| -------------------------------------------------------- | :-------------: | :---------------------------: |
+| Per-endpoint token-bucket RPS limiting                   |       ✅        |              ❌               |
+| Per-endpoint concurrency control (`inFlight`)            |       ✅        |              ❌               |
+| Respects `Retry-After` header on 429                     |       ✅        |              ❌               |
+| Graduated cooldown (rate limit / timeout / 5xx)          |       ✅        |              ❌               |
+| Retries on transport errors only (not on logical errors) |       ✅        |              ❌               |
+| Structured observability events (`RpcEvent`)             |       ✅        |              ❌               |
+| Per-provider stats snapshot                              |       ✅        |              ❌               |
+| Sequential failover (one endpoint at a time)             |       ✅        | ❌ (fires all simultaneously) |
+| ethers.js v6 compatible                                  |       ✅        |              ✅               |
+| Drop-in library (no extra infra)                         |       ✅        |              ✅               |
+| Quorum / consensus across backends                       |       ❌        |              ✅               |
+
+**When FallbackProvider is the right choice:** you need result consensus across multiple nodes (e.g. reading from multiple archive nodes and comparing answers).
+
+**When ethers-rpc-pool is the right choice:** you need high-throughput, rate-limit-aware, observable RPC access from a backend service — and you don't care which node answers, only that _someone_ does quickly and reliably.
+
+### Known FallbackProvider issues in production
+
+Several recurring problems are documented in the ethers.js issue tracker:
+
+- **Hangs on slow RPCs** — if one backend stalls, the entire provider can stall even when others are healthy ([#2030](https://github.com/ethers-io/ethers.js/issues/2030))
+- **Fires all backends simultaneously** — even with `quorum: 1`, every request is sent to all backends, wasting RPC quota ([#3118](https://github.com/ethers-io/ethers.js/issues/3118))
+- **No rate-limit awareness** — no concept of per-endpoint RPS limits or `Retry-After` headers
+- **Broken error handling for non-ETH errors** — a 401 Unauthorized can be reported as contract reversion ([discussion #3500](https://github.com/ethers-io/ethers.js/discussions/3500))
+
+`ethers-rpc-pool` addresses all of these.
 
 ---
 
@@ -293,6 +333,96 @@ const poolProvider = new RPCPoolProvider({
     onEvent(event) {
       if (event.type === 'error' && event.isRateLimit) {
         rateLimitCounter.inc({ provider: event.providerId });
+      }
+    },
+  },
+});
+```
+
+### Prometheus Example
+
+Uses [`prom-client`](https://github.com/siimon/prom-client):
+
+```ts
+import { Counter, Histogram, Registry } from 'prom-client';
+import { RPCPoolProvider } from 'ethers-rpc-pool';
+
+const registry = new Registry();
+
+const rpcRequests = new Counter({
+  name: 'rpc_requests_total',
+  help: 'Total RPC requests sent',
+  labelNames: ['provider', 'method'],
+  registers: [registry],
+});
+
+const rpcDuration = new Histogram({
+  name: 'rpc_request_duration_ms',
+  help: 'RPC round-trip time in milliseconds',
+  labelNames: ['provider', 'method'],
+  buckets: [50, 100, 250, 500, 1000, 2500, 5000],
+  registers: [registry],
+});
+
+const rpcErrors = new Counter({
+  name: 'rpc_errors_total',
+  help: 'Total RPC errors',
+  labelNames: ['provider', 'method', 'kind'],
+  registers: [registry],
+});
+
+const pool = new RPCPoolProvider({
+  network: 1,
+  rpc: [{ url: 'https://eth.drpc.org' }, { url: 'https://eth1.lava.build' }],
+  defaultRpcOptions: { inFlight: 1, rps: 10 },
+  retry: { attempts: 3 },
+  hooks: {
+    onEvent(e) {
+      if (e.type === 'request') {
+        rpcRequests.inc({ provider: e.providerId, method: e.method });
+      } else if (e.type === 'response') {
+        rpcDuration.observe({ provider: e.providerId, method: e.method }, e.ms);
+      } else if (e.type === 'error') {
+        const kind = e.isRateLimit ? 'rate_limit' : e.isTimeout ? 'timeout' : 'server';
+        rpcErrors.inc({ provider: e.providerId, method: e.method, kind });
+      }
+    },
+  },
+});
+```
+
+### OpenTelemetry Example
+
+Uses `@opentelemetry/api`:
+
+```ts
+import { metrics } from '@opentelemetry/api';
+import { RPCPoolProvider } from 'ethers-rpc-pool';
+
+const meter = metrics.getMeter('ethers-rpc-pool');
+
+const rpcDuration = meter.createHistogram('rpc.request.duration', {
+  description: 'RPC round-trip time in milliseconds',
+  unit: 'ms',
+});
+
+const rpcErrors = meter.createCounter('rpc.errors', {
+  description: 'Total RPC errors by kind',
+});
+
+const pool = new RPCPoolProvider({
+  network: 1,
+  rpc: [{ url: 'https://eth.drpc.org' }, { url: 'https://eth1.lava.build' }],
+  defaultRpcOptions: { inFlight: 1, rps: 10 },
+  retry: { attempts: 3 },
+  hooks: {
+    onEvent(e) {
+      const attrs = { 'rpc.provider': e.providerId, 'rpc.method': e.method };
+      if (e.type === 'response') {
+        rpcDuration.record(e.ms, attrs);
+      } else if (e.type === 'error') {
+        const kind = e.isRateLimit ? 'rate_limit' : e.isTimeout ? 'timeout' : 'server';
+        rpcErrors.add(1, { ...attrs, 'rpc.error.kind': kind });
       }
     },
   },
