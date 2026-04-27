@@ -1,6 +1,7 @@
 [![npm (tag)](https://img.shields.io/npm/v/ethers-rpc-pool)](https://www.npmjs.com/package/ethers-rpc-pool)
 ![license](https://img.shields.io/npm/l/ethers-rpc-pool)
 [![CI](https://github.com/ahiipsa/ethers-rpc-pool/actions/workflows/ci.yml/badge.svg)](https://github.com/ahiipsa/ethers-rpc-pool/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/ahiipsa/ethers-rpc-pool/branch/main/graph/badge.svg)](https://codecov.io/gh/ahiipsa/ethers-rpc-pool)
 
 # ethers-rpc-pool
 
