@@ -15,6 +15,18 @@ describe('RpsLimiter', () => {
     vi.restoreAllMocks();
   });
 
+  it('isAvailable(): returns true when rps<=0 (disabled)', () => {
+    expect(new RpsLimiter(0).isAvailable()).toBe(true);
+    expect(new RpsLimiter(-1).isAvailable()).toBe(true);
+  });
+
+  it('refill(): does not modify tokens when rps<=0', () => {
+    const limiter = new RpsLimiter(0, 5);
+    const before = (limiter as any).tokens;
+    (limiter as any).refill(Date.now() + 10_000);
+    expect((limiter as any).tokens).toBe(before);
+  });
+
   it('does nothing (resolves immediately) when rps<=0', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));

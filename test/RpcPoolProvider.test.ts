@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { RPCPoolProvider } from '../src/RpcPoolProvider';
 import { Router } from '../src/Router';
 import type { Endpoint } from '../src/utils';
-import { JsonRpcProvider } from 'ethers';
+import { FetchRequest, JsonRpcProvider } from 'ethers';
 
 function flushMicrotasks(): Promise<void> {
   return Promise.resolve().then(() => undefined);
@@ -53,6 +53,19 @@ describe('RPCPoolProvider', () => {
     expect(sizeSpy).toHaveBeenCalledTimes(2);
     expect(sendSpy).toHaveBeenCalledTimes(1);
     expect(sendSpy).toHaveBeenCalledWith('eth_chainId', []);
+  });
+
+  it('constructor: accepts FetchRequest as rpc[i].url', async () => {
+    vi.spyOn(JsonRpcProvider.prototype, '_send').mockResolvedValue([{ id: 1, result: 'OK' }]);
+
+    const pool = new RPCPoolProvider({
+      network: 1,
+      rpc: [{ url: new FetchRequest('http://rpc1.example') }],
+      defaultRpcOptions: { inFlight: 1 },
+      retry: { attempts: 1 },
+    });
+
+    await expect(pool.send('eth_chainId', [])).resolves.toBe('OK');
   });
 
   it('send(): failover on rate limit (429) and succeeds on second endpoint after backoff', async () => {
@@ -201,6 +214,49 @@ describe('RPCPoolProvider', () => {
 
     expect(sizeSpy).toHaveBeenCalledTimes(1);
     expect(pickSpy).toHaveBeenCalledTimes(0);
+  });
+
+  it('send(): skips dedup block on retry when all endpoints already tried (tried.size >= router.size())', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+
+    const rateLimitErr: any = new Error('rate limit');
+    rateLimitErr.status = 429;
+
+    let calls = 0;
+    const ep1 = mkEndpoint('p1', async () => {
+      if (calls++ === 0) throw rateLimitErr;
+      return 'OK';
+    });
+
+    const pool = new RPCPoolProvider({
+      network: 1,
+      rpc: [{ url: 'http://rpc1.example' }],
+      defaultRpcOptions: { inFlight: 1 },
+      retry: { attempts: 2 },
+    });
+
+    vi.spyOn(pool.router, 'pick').mockReturnValue(ep1);
+    vi.spyOn(pool.router, 'size').mockReturnValue(1);
+
+    const promise = pool.send('eth_blockNumber', []);
+
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(0);
+
+    await expect(promise).resolves.toBe('OK');
+    expect(ep1.provider.send).toHaveBeenCalledTimes(2);
+  });
+
+  it('send(): throws "No RPC available" when retry.attempts=0 (loop never executes)', async () => {
+    const pool = new RPCPoolProvider({
+      network: 1,
+      rpc: [{ url: 'http://rpc1.example' }],
+      defaultRpcOptions: { inFlight: 1 },
+      retry: { attempts: 0 },
+    });
+
+    await expect(pool.send('eth_chainId', [])).rejects.toThrow('No RPC available');
   });
 
   describe('_handleTransportEvent stat aggregation', () => {
