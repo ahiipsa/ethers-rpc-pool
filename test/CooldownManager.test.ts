@@ -60,6 +60,15 @@ describe('CooldownManager', () => {
     expect(cooldown.setCooldown).toHaveBeenCalledWith('p1', 30_000);
   });
 
+  it('timeout: no cooldown when n = 0 (timeout before any request event)', () => {
+    const cooldown = { setCooldown: vi.fn() };
+    const mgr = new CooldownManager(cooldown);
+
+    mgr.onEvent(errorEvent({ isTimeout: true }));
+
+    expect(cooldown.setCooldown).not.toHaveBeenCalled();
+  });
+
   it('timeout: no cooldown when n < 50', () => {
     const cooldown = { setCooldown: vi.fn() };
     const mgr = new CooldownManager(cooldown);

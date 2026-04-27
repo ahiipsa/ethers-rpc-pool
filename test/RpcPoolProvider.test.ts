@@ -203,6 +203,113 @@ describe('RPCPoolProvider', () => {
     expect(pickSpy).toHaveBeenCalledTimes(0);
   });
 
+  describe('_handleTransportEvent stat aggregation', () => {
+    function mkPool(overrides: Record<string, any> = {}) {
+      return new RPCPoolProvider({
+        network: 1,
+        rpc: [{ url: 'http://rpc1.example' }],
+        defaultRpcOptions: { inFlight: 1 },
+        retry: { attempts: 2 },
+        ...overrides,
+      });
+    }
+
+    function transportError(
+      overrides: Record<string, any> = {},
+    ): Parameters<RPCPoolProvider['send']>[0] {
+      return {
+        type: 'error',
+        chainId: 1n,
+        providerId: 'p1',
+        method: 'eth_call',
+        startedAt: 0,
+        endedAt: 1,
+        ms: 1,
+        isRateLimit: false,
+        isTimeout: false,
+        message: '',
+        ...overrides,
+      } as any;
+    }
+
+    it('isRateLimit error: bumps rateLimitedTotal', () => {
+      const pool = mkPool();
+      (pool as any)._handleTransportEvent(transportError({ isRateLimit: true }));
+      expect(pool.stats.snapshot().rateLimitedTotal).toBe(1);
+    });
+
+    it('isTimeout error: bumps timeoutTotal', () => {
+      const pool = mkPool();
+      (pool as any)._handleTransportEvent(transportError({ isTimeout: true }));
+      expect(pool.stats.snapshot().timeoutTotal).toBe(1);
+    });
+
+    it('status >= 500 error: bumps perProviderError', () => {
+      const pool = mkPool();
+      (pool as any)._handleTransportEvent(transportError({ status: 500 }));
+      expect(pool.stats.snapshot().perProviderError['p1']).toBe(1);
+    });
+
+    it('hooks.onEvent is called when hook is configured', () => {
+      const onEvent = vi.fn();
+      const pool = mkPool({ hooks: { onEvent } });
+      (pool as any)._handleTransportEvent({
+        type: 'request',
+        chainId: 1n,
+        providerId: 'p1',
+        method: 'eth_call',
+        startedAt: 0,
+      });
+      expect(onEvent).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('send() with RPC logical error', () => {
+    it('calls bumpRpcError and fires hook with errorKind=rpc', async () => {
+      const onEvent = vi.fn();
+      const rpcErr: any = new Error('execution reverted');
+      rpcErr.error = { code: -32000 };
+
+      const ep1 = mkEndpoint('p1', async () => {
+        throw rpcErr;
+      });
+      const pool = new RPCPoolProvider({
+        network: 1,
+        rpc: [{ url: 'http://rpc1.example' }],
+        defaultRpcOptions: { inFlight: 1 },
+        retry: { attempts: 2 },
+        hooks: { onEvent },
+      });
+
+      vi.spyOn(pool.router, 'pick').mockReturnValue(ep1);
+      vi.spyOn(pool.router, 'size').mockReturnValue(1);
+
+      await expect(pool.send('eth_call', [])).rejects.toThrow('execution reverted');
+
+      expect(pool.stats.snapshot().rpcErrorTotal).toBe(1);
+      const rpcErrorEvent = onEvent.mock.calls.find(([e]: [any]) => e.errorKind === 'rpc');
+      expect(rpcErrorEvent).toBeDefined();
+      expect(rpcErrorEvent![0]).toMatchObject({
+        type: 'error',
+        providerId: 'p1',
+        method: 'eth_call',
+        isRateLimit: false,
+        isTimeout: false,
+        errorKind: 'rpc',
+      });
+    });
+  });
+
+  it('getStats(): returns the stats instance', () => {
+    const pool = new RPCPoolProvider({
+      network: 1,
+      rpc: [{ url: 'http://rpc1.example' }],
+      defaultRpcOptions: { inFlight: 1 },
+      retry: { attempts: 1 },
+    });
+    expect(pool.getStats()).toBe(pool.stats);
+  });
+
   it('send(): respects RPS limit by delaying requests when rate limit is reached', async () => {
     const baseSend = vi.spyOn(JsonRpcProvider.prototype, '_send').mockResolvedValue([
       { id: 1, result: 'OK' },
