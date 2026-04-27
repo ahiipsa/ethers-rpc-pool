@@ -7,7 +7,7 @@ import {
   Networkish,
 } from 'ethers';
 import { Semaphore } from './Semaphore';
-import { Stats } from './Stats';
+import { IProviderStats } from './Stats';
 import {
   getHttpStatus,
   getRetryAfterMs,
@@ -20,7 +20,7 @@ import { RpsLimiter } from './RpsLimiter';
 
 export interface InstrumentedJsonRpcProviderOptions extends JsonRpcApiProviderOptions {
   providerId: string;
-  stats: Stats;
+  stats: IProviderStats;
   inFlight?: number;
   timeout?: number;
   rps?: number;
@@ -38,7 +38,7 @@ export class InstrumentedJsonRpcProvider extends JsonRpcProvider {
 
   readonly inFlightLimiter: Semaphore;
   readonly rpsLimiter: RpsLimiter;
-  readonly stats: Stats;
+  readonly stats: IProviderStats;
   readonly fetchRequest: FetchRequest;
 
   private lastCooldownMs: number = 0;

@@ -1,12 +1,12 @@
 import { Endpoint } from './utils';
-import { Stats } from './Stats';
+import { IRouterStats } from './Stats';
 
 export class Router {
   private rr = 0;
 
   constructor(
     private readonly endpoints: Endpoint[],
-    private readonly stats: Stats,
+    private readonly stats: IRouterStats,
   ) {}
 
   size(): number {
