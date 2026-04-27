@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Per-endpoint `weight` and `priority` options. `priority` (default `0`, higher = preferred) groups endpoints into tiers tried high→low; `weight` (default `1`) controls proportional traffic share within a tier via weighted round-robin. When all endpoints in a tier are unavailable, routing falls through to the next tier. When all tiers are exhausted, the fallback returns from the highest-priority tier without availability check (no deadlock).
+- `Router.totalSlots()` — sum of all weights; used internally as the retry-dedup scan bound in `send()`.
 - `CooldownManager`: circuit breaker with half-open state. After a cooldown expires one probe request is allowed through; on success the circuit closes, on failure it re-opens with escalated cooldown. Any error type (rate-limit, timeout, 5xx) during a probe triggers re-open.
 - `CircuitState` type (`'closed' | 'open' | 'half-open'`) exported from the package.
 - `CooldownManager.circuitStateSnapshot()` — returns current circuit state for non-closed providers.

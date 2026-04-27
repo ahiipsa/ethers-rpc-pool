@@ -206,14 +206,16 @@ interface RpcEndpointOptions {
 
 ### Per-Endpoint Options
 
-| Option     | Default | Description                                                                                                                            |
-| ---------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `url`      | —       | RPC endpoint URL (required)                                                                                                            |
-| `inFlight` | `1`     | Max concurrent in-flight requests                                                                                                      |
-| `timeout`  | `10000` | HTTP timeout in ms                                                                                                                     |
-| `rps`      | `10`    | Sustained request rate (requests/sec). Enforced by a token bucket.                                                                     |
-| `rpsBurst` | `= rps` | Burst capacity. Allows short spikes above `rps` by consuming tokens accumulated during idle time.                                      |
-| `...`      | —       | Any [ethers.JsonRpcApiProviderOptions](https://docs.ethers.org/v6/api/providers/jsonrpc/#JsonRpcApiProviderOptions) are also accepted. |
+| Option     | Default | Description                                                                                                                              |
+| ---------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`      | —       | RPC endpoint URL (required)                                                                                                              |
+| `priority` | `0`     | Routing tier. Higher value = tried first. Endpoints with the same priority share traffic via weighted round-robin.                       |
+| `weight`   | `1`     | Proportional traffic share within the same priority tier. An endpoint with `weight: 3` receives 3× more picks than one with `weight: 1`. |
+| `inFlight` | `1`     | Max concurrent in-flight requests                                                                                                        |
+| `timeout`  | `10000` | HTTP timeout in ms                                                                                                                       |
+| `rps`      | `10`    | Sustained request rate (requests/sec). Enforced by a token bucket.                                                                       |
+| `rpsBurst` | `= rps` | Burst capacity. Allows short spikes above `rps` by consuming tokens accumulated during idle time.                                        |
+| `...`      | —       | Any [ethers.JsonRpcApiProviderOptions](https://docs.ethers.org/v6/api/providers/jsonrpc/#JsonRpcApiProviderOptions) are also accepted.   |
 
 ---
 
@@ -221,7 +223,15 @@ interface RpcEndpointOptions {
 
 ### 1. Routing
 
-Requests are distributed across endpoints in round-robin order. Endpoints in `open` cooldown or `half-open` with a probe already in flight are skipped. If every endpoint is unavailable, the next one in round-robin is used anyway — the pool never deadlocks.
+Endpoints are grouped by `priority` and tried high→low. Within each group, traffic is distributed by weighted round-robin according to `weight`. If every endpoint in a group is unavailable, routing falls through to the next tier. If every endpoint across all tiers is unavailable, the pool returns from the highest-priority group anyway — it never deadlocks.
+
+```ts
+rpc: [
+  { url: 'https://alchemy.com/...', priority: 1 }, // tried first
+  { url: 'https://eth.drpc.org', priority: 0 }, // fallback
+  { url: 'https://eth1.lava.build', priority: 0, weight: 2 }, // 2× share in fallback tier
+];
+```
 
 ### 2. Concurrency Control
 
