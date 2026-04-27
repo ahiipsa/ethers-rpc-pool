@@ -6,121 +6,142 @@ function flushMicrotasks(): Promise<void> {
 }
 
 describe('Semaphore', () => {
-  it('throws if max is not a positive finite number', () => {
-    expect(() => new Semaphore(0)).toThrow();
-    expect(() => new Semaphore(-1)).toThrow();
-    expect(() => new Semaphore(Number.NaN)).toThrow();
-    expect(() => new Semaphore(Number.POSITIVE_INFINITY)).toThrow();
+  describe('constructor', () => {
+    it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])('throws for invalid max=%s', (max) => {
+      expect(() => new Semaphore(max)).toThrow();
+    });
   });
 
-  it('acquires immediately up to max', async () => {
-    const s = new Semaphore(2);
+  describe('isAvailable()', () => {
+    it('returns true when slots are free', () => {
+      const s = new Semaphore(2);
+      expect(s.isAvailable()).toBe(true);
+    });
 
-    const r1 = await s.acquire();
-    const r2 = await s.acquire();
+    it('returns false when all slots are occupied', async () => {
+      const s = new Semaphore(1);
+      await s.acquire();
+      expect(s.isAvailable()).toBe(false);
+    });
 
-    // if the 2nd acquire was blocking, the test would hang/fail by timeout
-    expect(typeof r1).toBe('function');
-    expect(typeof r2).toBe('function');
-
-    r1();
-    r2();
+    it('returns true again after release', async () => {
+      const s = new Semaphore(1);
+      const release = await s.acquire();
+      expect(s.isAvailable()).toBe(false);
+      release();
+      expect(s.isAvailable()).toBe(true);
+    });
   });
 
-  it('queues when at capacity and resolves after release', async () => {
-    const s = new Semaphore(1);
-
-    const r1 = await s.acquire();
-
-    let acquired2 = false;
-    const p2 = s.acquire().then((r2) => {
-      acquired2 = true;
-      return r2;
+  describe('acquire()', () => {
+    it('resolves immediately while under capacity', async () => {
+      const s = new Semaphore(2);
+      const r1 = await s.acquire();
+      const r2 = await s.acquire();
+      expect(typeof r1).toBe('function');
+      expect(typeof r2).toBe('function');
+      r1();
+      r2();
     });
 
-    // until r1 is released, the second one should not be acquired
-    await flushMicrotasks();
-    expect(acquired2).toBe(false);
+    it('blocks when at capacity and unblocks after release', async () => {
+      const s = new Semaphore(1);
+      const r1 = await s.acquire();
 
-    r1();
+      let acquired2 = false;
+      const p2 = s.acquire().then((r2) => {
+        acquired2 = true;
+        return r2;
+      });
 
-    const r2 = await p2;
-    expect(acquired2).toBe(true);
+      await flushMicrotasks();
+      expect(acquired2).toBe(false);
 
-    r2();
+      r1();
+      const r2 = await p2;
+      expect(acquired2).toBe(true);
+      r2();
+    });
+
+    it('processes queued acquirers in FIFO order', async () => {
+      const s = new Semaphore(1);
+      const r1 = await s.acquire();
+
+      const order: string[] = [];
+
+      const p2 = s.acquire().then((r) => {
+        order.push('p2');
+        return r;
+      });
+      const p3 = s.acquire().then((r) => {
+        order.push('p3');
+        return r;
+      });
+
+      await flushMicrotasks();
+      expect(order).toEqual([]);
+
+      r1();
+      const r2 = await p2;
+      expect(order).toEqual(['p2']);
+
+      r2();
+      const r3 = await p3;
+      expect(order).toEqual(['p2', 'p3']);
+
+      r3();
+    });
   });
 
-  it('is FIFO: releases wake queued acquirers in order', async () => {
-    const s = new Semaphore(1);
+  describe('release function idempotency', () => {
+    it('double-releasing an immediate acquire does not over-release', async () => {
+      const s = new Semaphore(1);
+      const r1 = await s.acquire();
 
-    const r1 = await s.acquire();
+      let acquired2 = false;
+      const p2 = s.acquire().then((r2) => {
+        acquired2 = true;
+        return r2;
+      });
 
-    const order: string[] = [];
+      await flushMicrotasks();
+      r1();
+      r1(); // second call must be a no-op
 
-    const p2 = s.acquire().then((r) => {
-      order.push('p2');
-      return r;
-    });
-    const p3 = s.acquire().then((r) => {
-      order.push('p3');
-      return r;
-    });
+      const r2 = await p2;
+      expect(acquired2).toBe(true);
 
-    await flushMicrotasks();
-    expect(order).toEqual([]);
+      // semaphore should still be at capacity — p3 must block
+      let acquired3 = false;
+      const p3 = s.acquire().then((r3) => {
+        acquired3 = true;
+        return r3;
+      });
+      await flushMicrotasks();
+      expect(acquired3).toBe(false);
 
-    // release the first one - p2 should wake up
-    r1();
-    const r2 = await p2;
-
-    await flushMicrotasks();
-    expect(order).toEqual(['p2']);
-
-    // release the second one - p3 should wake up
-    r2();
-    const r3 = await p3;
-
-    await flushMicrotasks();
-    expect(order).toEqual(['p2', 'p3']);
-
-    r3();
-  });
-
-  it('release function is idempotent and does not over-release', async () => {
-    const s = new Semaphore(1);
-
-    const r1 = await s.acquire();
-
-    let acquired2 = false;
-    const p2 = s.acquire().then((r2) => {
-      acquired2 = true;
-      return r2;
+      r2();
+      await p3;
     });
 
-    await flushMicrotasks();
-    expect(acquired2).toBe(false);
+    it('double-releasing a queued acquire does not over-release', async () => {
+      const s = new Semaphore(1);
+      const r1 = await s.acquire();
 
-    // double release should not "release" more than one waiting acquirer
-    r1();
-    r1();
+      // r2 goes through the queued path
+      const p2 = s.acquire();
+      r1();
+      const r2 = await p2;
 
-    const r2 = await p2;
-    expect(acquired2).toBe(true);
+      r2();
+      r2(); // second call must be a no-op
 
-    // if the semaphore went into negative inUse or "released" extra, the next acquire could pass incorrectly; let's check that it blocks.
-    const r2Hold = r2; // hold the slot
+      expect(s.isAvailable()).toBe(true);
 
-    let acquired3 = false;
-    const p3 = s.acquire().then((r3) => {
-      acquired3 = true;
-      return r3;
+      // confirm the semaphore is not corrupted: next acquire resolves immediately
+      const r3 = await s.acquire();
+      expect(s.isAvailable()).toBe(false);
+      r3();
     });
-
-    await flushMicrotasks();
-    expect(acquired3).toBe(false);
-
-    r2Hold();
-    const r3 = await p3;
-    r3();
   });
 });
