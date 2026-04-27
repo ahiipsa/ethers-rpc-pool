@@ -11,6 +11,8 @@ import { CooldownManager } from './CooldownManager';
 interface RPCPoolProviderOptions extends Partial<InstrumentedJsonRpcProviderOptions> {
   url: string | FetchRequest;
   network?: Networkish;
+  weight?: number;
+  priority?: number;
 }
 
 export interface RPCPoolProviderParams {
@@ -39,21 +41,23 @@ export class RPCPoolProvider extends JsonRpcProvider {
     this._stats = new Stats();
     this._cooldown = new CooldownManager();
 
-    const endpoints: Endpoint[] = this.params.rpc.map((options, i) => {
+    const routerInputs = this.params.rpc.map((options, i) => {
+      const { weight, priority, network: _n, ...providerOptions } = options;
       const url = typeof options.url === 'string' ? options.url : options.url.url;
       const providerId = `rpc#${i + 1}-chainId:${this.params.network}-${url}`;
 
       const provider = new InstrumentedJsonRpcProvider(options.url, this.params.network, {
         providerId,
         ...this.params.defaultRpcOptions,
-        ...options,
+        ...providerOptions,
         onEvent: (e) => this._handleTransportEvent(e),
       });
 
-      return { providerId, url, provider };
+      const endpoint: Endpoint = { providerId, url, provider };
+      return { endpoint, weight: weight ?? 1, priority: priority ?? 0 };
     });
 
-    this.router = new Router(endpoints, this._cooldown);
+    this.router = new Router(routerInputs, this._cooldown);
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -66,11 +70,10 @@ export class RPCPoolProvider extends JsonRpcProvider {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       let endpoint = this.router.pick();
 
-      // first, try to pick an endpoint that hasn't been tried yet
       if (tried.size < this.router.size()) {
         let retries = 0;
 
-        while (tried.has(endpoint.providerId) && retries < this.router.size()) {
+        while (tried.has(endpoint.providerId) && retries < this.router.totalSlots()) {
           endpoint = this.router.pick();
           retries++;
         }
