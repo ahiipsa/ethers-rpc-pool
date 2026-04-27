@@ -128,11 +128,19 @@ export class Stats implements IRouterStats {
   }
 
   isInCooldown(id: string) {
-    return (this._providerCooldownUntil[id] || 0) > Date.now();
+    const until = this._providerCooldownUntil[id];
+    if (until === undefined) return false;
+    if (until > Date.now()) return true;
+    delete this._providerCooldownUntil[id];
+    return false;
   }
 
   setCooldown(id: string, ms: number) {
     this._providerCooldownUntil[id] = Date.now() + ms;
+  }
+
+  removeProvider(id: string) {
+    delete this._providerCooldownUntil[id];
   }
 
   snapshot(): Readonly<RpcStatsSnapshot> {

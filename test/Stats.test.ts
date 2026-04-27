@@ -185,6 +185,33 @@ describe('Stats', () => {
       expect(stats.isInCooldown('p1')).toBe(false);
       vi.useRealTimers();
     });
+
+    it('removes expired entry from snapshot after isInCooldown check', () => {
+      vi.useFakeTimers();
+      stats.setCooldown('p1', 500);
+      vi.advanceTimersByTime(600);
+      expect(stats.isInCooldown('p1')).toBe(false);
+      expect(stats.snapshot().providerCooldownUntil['p1']).toBeUndefined();
+      vi.useRealTimers();
+    });
+  });
+
+  describe('removeProvider', () => {
+    it('removes cooldown entry so it no longer appears in snapshot', () => {
+      stats.setCooldown('p1', 10_000);
+      stats.removeProvider('p1');
+      expect(stats.snapshot().providerCooldownUntil['p1']).toBeUndefined();
+    });
+
+    it('removeProvider on active cooldown makes isInCooldown return false', () => {
+      stats.setCooldown('p1', 10_000);
+      stats.removeProvider('p1');
+      expect(stats.isInCooldown('p1')).toBe(false);
+    });
+
+    it('is a no-op for unknown provider', () => {
+      expect(() => stats.removeProvider('nonexistent')).not.toThrow();
+    });
   });
 
   describe('snapshot', () => {
