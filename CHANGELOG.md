@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-04-28
+
 ### Testing
 
 - Added test cases for previously uncovered edge scenarios: unclassified transport errors (no HTTP status, not rate-limit or timeout), and transport/RPC logical errors thrown as non-`Error` values without a `.message` property.
