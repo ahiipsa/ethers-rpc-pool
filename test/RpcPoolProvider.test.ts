@@ -50,7 +50,7 @@ describe('RPCPoolProvider', () => {
     await expect(pool.send('eth_chainId', [])).resolves.toBe('OK');
 
     expect(pickSpy).toHaveBeenCalledTimes(1);
-    expect(sizeSpy).toHaveBeenCalledTimes(1);
+    expect(sizeSpy).toHaveBeenCalledTimes(2);
     expect(sendSpy).toHaveBeenCalledTimes(1);
     expect(sendSpy).toHaveBeenCalledWith('eth_chainId', []);
   });

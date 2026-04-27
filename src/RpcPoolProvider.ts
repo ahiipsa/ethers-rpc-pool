@@ -59,6 +59,8 @@ export class RPCPoolProvider extends JsonRpcProvider {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async send(method: string, params: any): Promise<any> {
+    if (this.router.size() === 0) throw new Error('No RPC available');
+
     const tried = new Set<string>();
     const maxAttempts = this.params.retry.attempts;
 

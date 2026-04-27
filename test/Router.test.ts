@@ -7,7 +7,7 @@ function ep(id: string): Endpoint {
   return {
     providerId: id,
     url: `http://example.invalid/${id}`,
-    provider: {} as any,
+    provider: { isAvailable: () => true } as any,
   };
 }
 
