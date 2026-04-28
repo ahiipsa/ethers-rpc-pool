@@ -335,9 +335,10 @@ describe('RPCPoolProvider', () => {
       expect(pool.getSnapshot().timeoutTotal).toBe(1);
     });
 
-    it('status >= 500 error: bumps perProviderError', () => {
+    it('status >= 500 error: bumps serverErrorTotal and perProviderError', () => {
       const pool = mkPool();
       (pool as any)._handleTransportEvent(transportError({ status: 500 }));
+      expect(pool.getSnapshot().serverErrorTotal).toBe(1);
       expect(pool.getSnapshot().perProviderError['p1']).toBe(1);
     });
 

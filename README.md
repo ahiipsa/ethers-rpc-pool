@@ -504,6 +504,7 @@ const snapshot = pool.getSnapshot();
 | `perProviderRateLimited` | Rate-limit errors per endpoint                                                                                                           |
 | `timeoutTotal`           | Total timeout errors                                                                                                                     |
 | `perProviderTimeout`     | Timeout errors per endpoint                                                                                                              |
+| `serverErrorTotal`       | Total 5xx server errors                                                                                                                  |
 | `perProviderTotal`       | Total requests per endpoint                                                                                                              |
 | `perProviderInFlight`    | Currently in-flight requests per endpoint                                                                                                |
 | `perProviderError`       | Transport errors (5xx, network) per endpoint                                                                                             |
@@ -530,6 +531,7 @@ const snapshot = pool.getSnapshot();
   },
   "rateLimitedTotal": 0,
   "timeoutTotal": 0,
+  "serverErrorTotal": 0,
   "rpcErrorTotal": 0,
   "perProviderRateLimited": {},
   "perProviderTimeout": {},

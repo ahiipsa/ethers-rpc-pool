@@ -129,6 +129,7 @@ describe('Stats', () => {
       stats.onEvent(errorEvent('p2', { status: 500 }));
 
       const s = stats.snapshot();
+      expect(s.serverErrorTotal).toBe(3);
       expect(s.perProviderError['p1']).toBe(2);
       expect(s.perProviderError['p2']).toBe(1);
     });
@@ -142,6 +143,7 @@ describe('Stats', () => {
       const s = stats.snapshot();
       expect(s.rateLimitedTotal).toBe(0);
       expect(s.timeoutTotal).toBe(0);
+      expect(s.serverErrorTotal).toBe(0);
       expect(s.perProviderRateLimited['p1']).toBeUndefined();
       expect(s.perProviderTimeout['p1']).toBeUndefined();
       expect(s.perProviderError['p1']).toBeUndefined();

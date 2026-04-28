@@ -9,6 +9,7 @@ export interface RpcStatsSnapshot {
   perProviderRateLimited: Record<string, number>;
   timeoutTotal: number;
   perProviderTimeout: Record<string, number>;
+  serverErrorTotal: number;
   perProviderTotal: Record<string, number>;
   providerCooldownUntil: Record<string, number>;
   providerCircuitState: Record<string, CircuitState>;
@@ -35,6 +36,7 @@ export class Stats {
 
   private _rateLimitedTotal = 0;
   private _timeoutTotal = 0;
+  private _serverErrorTotal = 0;
   private _rpcErrorTotal = 0;
 
   private _perProviderInFlight: Record<string, number> = {};
@@ -78,6 +80,7 @@ export class Stats {
         this._timeoutTotal++;
         this._bump(this._perProviderTimeout, id);
       } else if (e.status !== undefined && e.status >= 500) {
+        this._serverErrorTotal++;
         this._bump(this._perProviderError, id);
       }
     }
@@ -109,6 +112,7 @@ export class Stats {
       perMethodTotal: { ...this._perMethod },
       rateLimitedTotal: this._rateLimitedTotal,
       timeoutTotal: this._timeoutTotal,
+      serverErrorTotal: this._serverErrorTotal,
       rpcErrorTotal: this._rpcErrorTotal,
       perProviderMethod: Object.fromEntries(
         Object.entries(this._perProviderMethod).map(([k, v]) => [k, { ...v }]),
