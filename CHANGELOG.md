@@ -7,9 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0] — 2026-04-28
+
 ### Added
 
 - `RPCPoolProvider.pinnedProvider()` — returns an `InstrumentedJsonRpcProvider` pinned to the single best endpoint selected at call time (via the same P2C/EWMA routing as `send()`). Use when consecutive calls must observe consistent chain state — e.g. `eth_getBalance` followed by `eth_call` on the same block. Without pinning each call may route to a different node that lags behind.
+- `RpcStatsSnapshot.serverErrorTotal` — cumulative count of 5xx server errors across all endpoints, exposed via `getSnapshot()`.
+- Active health probing via `healthProbe?: { intervalMs?: number }` in `RPCPoolProviderParams`. When enabled, a background `eth_blockNumber` poll probes providers in the `open` circuit state once their cooldown expires, triggering recovery without waiting for real user traffic. Default interval: 15 000 ms. Call `destroy()` to stop the timer. The interval is unref'd so it does not prevent the process from exiting.
+
+### Changed
+
+- `sandbox.ts` moved to `scripts/` and excluded from the build.
 
 ## [3.1.1] — 2026-04-28
 

@@ -477,4 +477,322 @@ describe('RPCPoolProvider', () => {
     const provider = pool.pinnedProvider();
     expect(provider).toBeInstanceOf(InstrumentedJsonRpcProvider);
   });
+
+  describe('healthProbe', () => {
+    function openExpired(cooldown: any, providerId: string): void {
+      cooldown.onEvent({
+        type: 'error',
+        chainId: 1n,
+        providerId,
+        method: 'eth_blockNumber',
+        startedAt: 0,
+        endedAt: 1,
+        ms: 1,
+        isRateLimit: true,
+        isTimeout: false,
+        isNetworkError: false,
+        message: '',
+        retryAfterMs: 0,
+      });
+      vi.advanceTimersByTime(1);
+    }
+
+    it('no interval is started when healthProbe is undefined', () => {
+      const pool = new RPCPoolProvider({
+        network: 1,
+        rpc: [{ url: 'http://rpc1.example' }],
+        defaultRpcOptions: { inFlight: 1 },
+        retry: { attempts: 1 },
+      });
+      expect((pool as any)._probeInterval).toBeUndefined();
+      pool.destroy();
+    });
+
+    it('destroy() is safe to call when no interval is set', () => {
+      const pool = new RPCPoolProvider({
+        network: 1,
+        rpc: [{ url: 'http://rpc1.example' }],
+        defaultRpcOptions: { inFlight: 1 },
+        retry: { attempts: 1 },
+      });
+      expect(() => pool.destroy()).not.toThrow();
+    });
+
+    it('destroy() is idempotent — safe to call twice', () => {
+      const pool = new RPCPoolProvider({
+        network: 1,
+        rpc: [{ url: 'http://rpc1.example' }],
+        defaultRpcOptions: { inFlight: 1 },
+        retry: { attempts: 1 },
+        healthProbe: { intervalMs: 5_000 },
+      });
+      expect(() => {
+        pool.destroy();
+        pool.destroy();
+      }).not.toThrow();
+    });
+
+    it('fires eth_blockNumber probe for open+expired provider at configured interval', () => {
+      vi.useFakeTimers();
+      const pool = new RPCPoolProvider({
+        network: 1,
+        rpc: [{ url: 'http://rpc1.example' }],
+        defaultRpcOptions: { inFlight: 1 },
+        retry: { attempts: 1 },
+        healthProbe: { intervalMs: 5_000 },
+      });
+      const ep = (pool as any)._endpoints[0];
+      const sendSpy = vi.spyOn(ep.provider, 'send').mockResolvedValue('0x1');
+
+      openExpired((pool as any)._cooldown, ep.id);
+
+      vi.advanceTimersByTime(5_000);
+
+      expect(sendSpy).toHaveBeenCalledWith('eth_blockNumber', []);
+      pool.destroy();
+    });
+
+    it('uses 15000ms as default interval when intervalMs is omitted', () => {
+      vi.useFakeTimers();
+      const pool = new RPCPoolProvider({
+        network: 1,
+        rpc: [{ url: 'http://rpc1.example' }],
+        defaultRpcOptions: { inFlight: 1 },
+        retry: { attempts: 1 },
+        healthProbe: {},
+      });
+
+      const probeSpy = vi.spyOn(pool as any, '_runHealthProbe');
+
+      vi.advanceTimersByTime(14_999);
+      expect(probeSpy).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1);
+      expect(probeSpy).toHaveBeenCalledTimes(1);
+
+      pool.destroy();
+    });
+
+    it('skips closed providers (no circuit state entry)', () => {
+      vi.useFakeTimers();
+      const pool = new RPCPoolProvider({
+        network: 1,
+        rpc: [{ url: 'http://rpc1.example' }],
+        defaultRpcOptions: { inFlight: 1 },
+        retry: { attempts: 1 },
+        healthProbe: { intervalMs: 5_000 },
+      });
+      const ep = (pool as any)._endpoints[0];
+      const sendSpy = vi.spyOn(ep.provider, 'send').mockResolvedValue('0x1');
+
+      vi.advanceTimersByTime(5_000);
+
+      expect(sendSpy).not.toHaveBeenCalled();
+      pool.destroy();
+    });
+
+    it('skips open providers whose cooldown has not yet expired', () => {
+      vi.useFakeTimers();
+      const pool = new RPCPoolProvider({
+        network: 1,
+        rpc: [{ url: 'http://rpc1.example' }],
+        defaultRpcOptions: { inFlight: 1 },
+        retry: { attempts: 1 },
+        healthProbe: { intervalMs: 5_000 },
+      });
+      const ep = (pool as any)._endpoints[0];
+      const sendSpy = vi.spyOn(ep.provider, 'send').mockResolvedValue('0x1');
+
+      (pool as any)._cooldown.onEvent({
+        type: 'error',
+        chainId: 1n,
+        providerId: ep.id,
+        method: 'eth_blockNumber',
+        startedAt: 0,
+        endedAt: 1,
+        ms: 1,
+        isRateLimit: true,
+        isTimeout: false,
+        isNetworkError: false,
+        message: '',
+        retryAfterMs: 60_000,
+      });
+
+      vi.advanceTimersByTime(5_000);
+
+      expect(sendSpy).not.toHaveBeenCalled();
+      pool.destroy();
+    });
+
+    it('skips half-open providers (probe already in flight)', () => {
+      vi.useFakeTimers();
+      const pool = new RPCPoolProvider({
+        network: 1,
+        rpc: [{ url: 'http://rpc1.example' }],
+        defaultRpcOptions: { inFlight: 1 },
+        retry: { attempts: 1 },
+        healthProbe: { intervalMs: 5_000 },
+      });
+      const ep = (pool as any)._endpoints[0];
+
+      openExpired((pool as any)._cooldown, ep.id);
+      // Claim the probe slot externally — transitions to half-open
+      (pool as any)._cooldown.isInCooldown(ep.id);
+
+      const sendSpy = vi.spyOn(ep.provider, 'send').mockResolvedValue('0x1');
+
+      vi.advanceTimersByTime(5_000);
+
+      expect(sendSpy).not.toHaveBeenCalled();
+      pool.destroy();
+    });
+
+    it('destroy() stops the interval — probe no longer fires after destroy', () => {
+      vi.useFakeTimers();
+      const pool = new RPCPoolProvider({
+        network: 1,
+        rpc: [{ url: 'http://rpc1.example' }],
+        defaultRpcOptions: { inFlight: 1 },
+        retry: { attempts: 1 },
+        healthProbe: { intervalMs: 5_000 },
+      });
+      const ep = (pool as any)._endpoints[0];
+      openExpired((pool as any)._cooldown, ep.id);
+
+      const sendSpy = vi.spyOn(ep.provider, 'send').mockResolvedValue('0x1');
+
+      pool.destroy();
+
+      vi.advanceTimersByTime(5_000);
+
+      expect(sendSpy).not.toHaveBeenCalled();
+    });
+
+    it('probes only open+expired providers when pool has multiple endpoints', () => {
+      vi.useFakeTimers();
+      const pool = new RPCPoolProvider({
+        network: 1,
+        rpc: [
+          { url: 'http://rpc1.example' },
+          { url: 'http://rpc2.example' },
+          { url: 'http://rpc3.example' },
+        ],
+        defaultRpcOptions: { inFlight: 1 },
+        retry: { attempts: 1 },
+        healthProbe: { intervalMs: 5_000 },
+      });
+      const [ep1, ep2, ep3] = (pool as any)._endpoints;
+      const send1 = vi.spyOn(ep1.provider, 'send').mockResolvedValue('0x1');
+      const send2 = vi.spyOn(ep2.provider, 'send').mockResolvedValue('0x1');
+      const send3 = vi.spyOn(ep3.provider, 'send').mockResolvedValue('0x1');
+
+      // ep1: open with expired cooldown → probed
+      openExpired((pool as any)._cooldown, ep1.id);
+
+      // ep2: open with live cooldown → not probed
+      (pool as any)._cooldown.onEvent({
+        type: 'error',
+        chainId: 1n,
+        providerId: ep2.id,
+        method: 'eth_blockNumber',
+        startedAt: 0,
+        endedAt: 1,
+        ms: 1,
+        isRateLimit: true,
+        isTimeout: false,
+        isNetworkError: false,
+        message: '',
+        retryAfterMs: 60_000,
+      });
+
+      // ep3: closed → not probed
+
+      vi.advanceTimersByTime(5_000);
+
+      expect(send1).toHaveBeenCalledWith('eth_blockNumber', []);
+      expect(send2).not.toHaveBeenCalled();
+      expect(send3).not.toHaveBeenCalled();
+
+      pool.destroy();
+    });
+
+    it('successful probe transitions provider from open to closed via event pipeline', async () => {
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      vi.spyOn(JsonRpcProvider.prototype, '_send').mockResolvedValue([{ id: 1, result: '0x1' }]);
+
+      const pool = new RPCPoolProvider({
+        network: 1,
+        rpc: [{ url: 'http://rpc1.example' }],
+        defaultRpcOptions: { inFlight: 1 },
+        retry: { attempts: 1 },
+        // no healthProbe — call _runHealthProbe() directly to avoid setInterval loop
+      });
+      const ep = (pool as any)._endpoints[0];
+
+      // retryAfterMs: 0 expires immediately in real time (Date.now() + 0 <= Date.now())
+      (pool as any)._cooldown.onEvent({
+        type: 'error',
+        chainId: 1n,
+        providerId: ep.id,
+        method: 'eth_blockNumber',
+        startedAt: 0,
+        endedAt: 1,
+        ms: 1,
+        isRateLimit: true,
+        isTimeout: false,
+        isNetworkError: false,
+        message: '',
+        retryAfterMs: 0,
+      });
+
+      (pool as any)._runHealthProbe();
+
+      // Allow the full ethers promise chain to resolve
+      await new Promise<void>((r) => setTimeout(r, 50));
+
+      expect((pool as any)._cooldown.circuitStateSnapshot()[ep.id]).toBeUndefined();
+    });
+
+    it('failed probe re-opens the circuit via event pipeline', async () => {
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+
+      const networkErr: any = new Error('connect ECONNREFUSED 127.0.0.1:8545');
+      networkErr.code = 'ECONNREFUSED';
+      vi.spyOn(JsonRpcProvider.prototype, '_send').mockRejectedValue(networkErr);
+
+      const pool = new RPCPoolProvider({
+        network: 1,
+        rpc: [{ url: 'http://rpc1.example' }],
+        defaultRpcOptions: { inFlight: 1 },
+        retry: { attempts: 1 },
+      });
+      const ep = (pool as any)._endpoints[0];
+
+      // Open via rate-limit path (does not set _lastCooldownMs)
+      (pool as any)._cooldown.onEvent({
+        type: 'error',
+        chainId: 1n,
+        providerId: ep.id,
+        method: 'eth_blockNumber',
+        startedAt: 0,
+        endedAt: 1,
+        ms: 1,
+        isRateLimit: true,
+        isTimeout: false,
+        isNetworkError: false,
+        message: '',
+        retryAfterMs: 0,
+      });
+
+      (pool as any)._runHealthProbe();
+
+      await new Promise<void>((r) => setTimeout(r, 50));
+
+      // Probe failed (ECONNREFUSED) → _openWithBackoff: prev=0, ms=10_000+0=10_000
+      expect((pool as any)._cooldown.circuitStateSnapshot()[ep.id]).toBe('open');
+      const cooldownUntil = (pool as any)._cooldown.cooldownSnapshot()[ep.id];
+      expect(cooldownUntil).toBeGreaterThanOrEqual(Date.now() + 9_900);
+      expect(cooldownUntil).toBeLessThanOrEqual(Date.now() + 10_100);
+    });
+  });
 });

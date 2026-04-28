@@ -22,6 +22,9 @@ export interface RPCPoolProviderParams {
   hooks?: {
     onEvent(e: RpcEvent): void;
   };
+  healthProbe?: {
+    intervalMs?: number;
+  };
 }
 
 export class RPCPoolProvider extends JsonRpcProvider {
@@ -29,6 +32,8 @@ export class RPCPoolProvider extends JsonRpcProvider {
   readonly params: RPCPoolProviderParams;
   private readonly _stats: Stats;
   private readonly _cooldown: CooldownManager;
+  private readonly _endpoints: ReadonlyArray<{ id: string; provider: InstrumentedJsonRpcProvider }>;
+  private _probeInterval: ReturnType<typeof setInterval> | undefined;
 
   constructor(params: RPCPoolProviderParams) {
     const network = Network.from(params.network);
@@ -37,6 +42,8 @@ export class RPCPoolProvider extends JsonRpcProvider {
     this.params = params;
     this._stats = new Stats();
     this._cooldown = new CooldownManager();
+
+    const endpoints: Array<{ id: string; provider: InstrumentedJsonRpcProvider }> = [];
 
     const routerInputs = this.params.rpc.map((options, i) => {
       const { priority, network: _n, ...providerOptions } = options;
@@ -50,11 +57,27 @@ export class RPCPoolProvider extends JsonRpcProvider {
         onEvent: (e) => this._handleTransportEvent(e),
       });
 
+      endpoints.push({ id: providerId, provider });
+
       const endpoint: Endpoint = { providerId, url, provider };
       return { endpoint, priority: priority ?? 0 };
     });
 
+    this._endpoints = endpoints;
     this.router = new Router(routerInputs, this._cooldown);
+
+    if (params.healthProbe !== undefined) {
+      const intervalMs = params.healthProbe.intervalMs ?? 15_000;
+      this._probeInterval = setInterval(() => this._runHealthProbe(), intervalMs);
+      (this._probeInterval as NodeJS.Timeout).unref?.();
+    }
+  }
+
+  destroy(): void {
+    if (this._probeInterval !== undefined) {
+      clearInterval(this._probeInterval);
+      this._probeInterval = undefined;
+    }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -110,6 +133,22 @@ export class RPCPoolProvider extends JsonRpcProvider {
   // pinning, each call may route to a different node that lags behind.
   pinnedProvider(): InstrumentedJsonRpcProvider {
     return this.router.pick().provider;
+  }
+
+  private _runHealthProbe(): void {
+    const states = this._cooldown.circuitStateSnapshot();
+    const cooldowns = this._cooldown.cooldownSnapshot();
+    const now = Date.now();
+
+    for (const { id, provider } of this._endpoints) {
+      if (states[id] !== 'open') continue;
+      const cooldownUntil = cooldowns[id];
+      if (cooldownUntil !== undefined && cooldownUntil > now) continue;
+      // isInCooldown atomically claims the probe slot (open→half-open side effect)
+      if (!this._cooldown.isInCooldown(id)) {
+        provider.send('eth_blockNumber', []).catch(() => {});
+      }
+    }
   }
 
   private _handleTransportEvent(e: RpcEvent): void {
