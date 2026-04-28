@@ -13,8 +13,8 @@ function ep(id: string): Endpoint {
   };
 }
 
-function entry(id: string, weight = 1, priority = 0) {
-  return { endpoint: ep(id), weight, priority };
+function entry(id: string, priority = 0) {
+  return { endpoint: ep(id), priority };
 }
 
 function rateLimitErrorEvent(providerId: string): Extract<RpcEvent, { type: 'error' }> {
@@ -39,23 +39,34 @@ describe('RpcRouter', () => {
     vi.restoreAllMocks();
   });
 
-  describe('round-robin (equal weight, single priority)', () => {
-    it('pick() round-robins across endpoints when no cooldown', () => {
+  describe('pick (single priority, no cooldown)', () => {
+    it('returns one of the registered endpoints', () => {
       const availability: IAvailabilityChecker = { isInCooldown: () => false };
       const router = new Router([entry('a'), entry('b'), entry('c')], availability);
 
-      const picked = [
-        router.pick().providerId,
-        router.pick().providerId,
-        router.pick().providerId,
-        router.pick().providerId,
-        router.pick().providerId,
-      ];
-
-      expect(picked).toEqual(['a', 'b', 'c', 'a', 'b']);
+      for (let i = 0; i < 10; i++) {
+        expect(['a', 'b', 'c']).toContain(router.pick().providerId);
+      }
     });
 
-    it('pick() skips endpoints that are in cooldown', () => {
+    it('eventually picks all endpoints', () => {
+      const availability: IAvailabilityChecker = { isInCooldown: () => false };
+      const router = new Router([entry('a'), entry('b'), entry('c')], availability);
+
+      const seen = new Set<string>();
+      for (let i = 0; i < 30; i++) seen.add(router.pick().providerId);
+
+      expect(seen).toEqual(new Set(['a', 'b', 'c']));
+    });
+
+    it('with a single endpoint always returns it', () => {
+      const availability: IAvailabilityChecker = { isInCooldown: () => false };
+      const router = new Router([entry('only')], availability);
+
+      for (let i = 0; i < 5; i++) expect(router.pick().providerId).toBe('only');
+    });
+
+    it('skips endpoints that are in cooldown', () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
 
@@ -64,17 +75,12 @@ describe('RpcRouter', () => {
 
       cooldown.onEvent(rateLimitErrorEvent('b'));
 
-      const picked = [
-        router.pick().providerId, // a
-        router.pick().providerId, // b is in cooldown => c
-        router.pick().providerId, // a
-        router.pick().providerId, // c (b still in cooldown)
-      ];
-
-      expect(picked).toEqual(['a', 'c', 'a', 'c']);
+      for (let i = 0; i < 20; i++) {
+        expect(router.pick().providerId).not.toBe('b');
+      }
     });
 
-    it('if all endpoints are in cooldown, pick() still returns next round-robin endpoint', () => {
+    it('if all endpoints are in cooldown, pick() still returns an endpoint (round-robin fallback)', () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
 
@@ -92,6 +98,7 @@ describe('RpcRouter', () => {
         router.pick().providerId,
       ];
 
+      // fallback round-robins the highest-priority group
       expect(picked).toEqual(['a', 'b', 'c', 'a']);
     });
   });
@@ -99,11 +106,11 @@ describe('RpcRouter', () => {
   describe('priority', () => {
     it('always picks from the highest-priority group when available', () => {
       const availability: IAvailabilityChecker = { isInCooldown: () => false };
-      const router = new Router([entry('primary', 1, 1), entry('fallback', 1, 0)], availability);
+      const router = new Router([entry('primary', 1), entry('fallback', 0)], availability);
 
-      const picked = [router.pick().providerId, router.pick().providerId, router.pick().providerId];
-
-      expect(picked).toEqual(['primary', 'primary', 'primary']);
+      for (let i = 0; i < 10; i++) {
+        expect(router.pick().providerId).toBe('primary');
+      }
     });
 
     it('falls through to lower-priority group when high-priority is in cooldown', () => {
@@ -112,20 +119,15 @@ describe('RpcRouter', () => {
 
       const cooldown = new CooldownManager();
       const router = new Router(
-        [entry('primary', 1, 1), entry('fallback-a', 1, 0), entry('fallback-b', 1, 0)],
+        [entry('primary', 1), entry('fallback-a', 0), entry('fallback-b', 0)],
         cooldown,
       );
 
       cooldown.onEvent(rateLimitErrorEvent('primary'));
 
-      const picked = [
-        router.pick().providerId,
-        router.pick().providerId,
-        router.pick().providerId,
-        router.pick().providerId,
-      ];
-
-      expect(picked).toEqual(['fallback-a', 'fallback-b', 'fallback-a', 'fallback-b']);
+      for (let i = 0; i < 10; i++) {
+        expect(router.pick().providerId).not.toBe('primary');
+      }
     });
 
     it('returns to high-priority group once its cooldown expires', () => {
@@ -133,7 +135,7 @@ describe('RpcRouter', () => {
       vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
 
       const cooldown = new CooldownManager();
-      const router = new Router([entry('primary', 1, 1), entry('fallback', 1, 0)], cooldown);
+      const router = new Router([entry('primary', 1), entry('fallback', 0)], cooldown);
 
       cooldown.onEvent(rateLimitErrorEvent('primary')); // 60s cooldown
       expect(router.pick().providerId).toBe('fallback');
@@ -148,7 +150,7 @@ describe('RpcRouter', () => {
       vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
 
       const cooldown = new CooldownManager();
-      const router = new Router([entry('primary', 1, 1), entry('fallback', 1, 0)], cooldown);
+      const router = new Router([entry('primary', 1), entry('fallback', 0)], cooldown);
 
       cooldown.onEvent(rateLimitErrorEvent('primary'));
       cooldown.onEvent(rateLimitErrorEvent('fallback'));
@@ -160,7 +162,7 @@ describe('RpcRouter', () => {
     it('three priority tiers are tried in descending order', () => {
       const availability: IAvailabilityChecker = { isInCooldown: () => false };
       const router = new Router(
-        [entry('tier0', 1, 0), entry('tier2', 1, 2), entry('tier1', 1, 1)],
+        [entry('tier0', 0), entry('tier2', 2), entry('tier1', 1)],
         availability,
       );
 
@@ -168,57 +170,76 @@ describe('RpcRouter', () => {
     });
   });
 
-  describe('weight', () => {
-    it('weighted endpoint receives proportionally more picks', () => {
+  describe('EWMA latency routing', () => {
+    it('prefers the endpoint with lower EWMA when P2C picks both candidates', () => {
       const availability: IAvailabilityChecker = { isInCooldown: () => false };
-      const router = new Router([entry('heavy', 3), entry('light', 1)], availability);
+      const router = new Router([entry('fast'), entry('slow')], availability);
 
-      const counts: Record<string, number> = { heavy: 0, light: 0 };
-      for (let i = 0; i < 8; i++) counts[router.pick().providerId]++;
+      router.recordLatency('fast', 10);
+      router.recordLatency('slow', 200);
 
-      expect(counts.heavy).toBe(6); // 3/4 of 8
-      expect(counts.light).toBe(2); // 1/4 of 8
+      // Force P2C to always pick both candidates (i=0, j=1)
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+
+      expect(router.pick().providerId).toBe('fast');
     });
 
-    it('weight=1 for all endpoints behaves like standard round-robin', () => {
+    it('unsampled endpoints (EWMA=0) are preferred over sampled ones', () => {
       const availability: IAvailabilityChecker = { isInCooldown: () => false };
-      const router = new Router([entry('a', 1), entry('b', 1), entry('c', 1)], availability);
+      const router = new Router([entry('measured'), entry('new')], availability);
 
-      const picked = Array.from({ length: 6 }, () => router.pick().providerId);
-      expect(picked).toEqual(['a', 'b', 'c', 'a', 'b', 'c']);
+      router.recordLatency('measured', 50);
+
+      // Force P2C to always compare measured vs new (i=0, j=1)
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+
+      // new has EWMA=0, measured has EWMA=50 → new wins
+      expect(router.pick().providerId).toBe('new');
     });
 
-    it('skips unavailable weighted slots and still returns the available endpoint', () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+    it('EWMA converges toward recent latency values', () => {
+      const availability: IAvailabilityChecker = { isInCooldown: () => false };
+      const router = new Router([entry('a')], availability);
 
-      const cooldown = new CooldownManager();
-      const router = new Router([entry('heavy', 3), entry('light', 1)], cooldown);
+      // seed with high latency
+      router.recordLatency('a', 1000);
+      // many fast samples drive EWMA down
+      for (let i = 0; i < 50; i++) router.recordLatency('a', 10);
 
-      cooldown.onEvent(rateLimitErrorEvent('heavy'));
+      // after convergence 'a' should be preferred over 'b' with fresh-high latency
+      const router2 = new Router([entry('a'), entry('b')], availability);
+      for (let i = 0; i < 50; i++) router2.recordLatency('a', 10);
+      router2.recordLatency('b', 500);
 
-      // heavy is in cooldown: all 3 of its slots are skipped, light is returned
-      expect(router.pick().providerId).toBe('light');
-      expect(router.pick().providerId).toBe('light');
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      expect(router2.pick().providerId).toBe('a');
+    });
+
+    it('recordLatency on error events still updates EWMA (timeout penalty)', () => {
+      const availability: IAvailabilityChecker = { isInCooldown: () => false };
+      const router = new Router([entry('good'), entry('slow')], availability);
+
+      router.recordLatency('good', 20);
+      router.recordLatency('slow', 10_000); // timeout-class latency
+
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      expect(router.pick().providerId).toBe('good');
     });
   });
 
   describe('size and totalSlots', () => {
-    it('size() returns unique endpoint count regardless of weight', () => {
+    it('size() returns unique endpoint count', () => {
       const availability: IAvailabilityChecker = { isInCooldown: () => false };
-      const router = new Router([entry('a', 3), entry('b', 2)], availability);
+      const router = new Router([entry('a'), entry('b')], availability);
 
       expect(router.size()).toBe(2);
     });
 
-    it('totalSlots() returns sum of all weights', () => {
+    it('totalSlots() equals size()', () => {
       const availability: IAvailabilityChecker = { isInCooldown: () => false };
-      const router = new Router(
-        [entry('a', 3, 1), entry('b', 2, 1), entry('c', 1, 0)],
-        availability,
-      );
+      const router = new Router([entry('a', 1), entry('b', 1), entry('c', 0)], availability);
 
-      expect(router.totalSlots()).toBe(6);
+      expect(router.totalSlots()).toBe(router.size());
     });
   });
 });

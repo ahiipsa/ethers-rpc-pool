@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] — 2026-04-28
+
+### Changed
+
+- **`weight` removed; routing within a priority tier now uses EWMA latency (P2C).** `RPCPoolProviderOptions.weight` is no longer accepted. The router tracks an exponentially-weighted moving average (α = 0.2) of response latency per endpoint and applies Power of Two Choices: two candidates are drawn at random from the available pool, and the one with the lower EWMA is picked. Unsampled endpoints start at EWMA = 0 so they are naturally explored before measured ones. Both successful (`response`) and failed (`error`) transport events contribute to the EWMA. When all endpoints are unavailable, the fallback is plain round-robin over the highest-priority group, unchanged.
+- **`Router.totalSlots()` now returns `size()`** — with weight removed there are no weighted slots; the value equals the number of unique endpoints and is still used as the retry-dedup scan bound in `send()`.
+
+### Removed
+
+- `weight` option in `RPCPoolProviderOptions` and `RouterEndpointInput` — **breaking change**.
+
 ## [2.0.0] — 2026-04-28
 
 ### Testing

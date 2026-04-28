@@ -11,7 +11,6 @@ import { CooldownManager } from './CooldownManager';
 interface RPCPoolProviderOptions extends Partial<InstrumentedJsonRpcProviderOptions> {
   url: string | FetchRequest;
   network?: Networkish;
-  weight?: number;
   priority?: number;
 }
 
@@ -42,7 +41,7 @@ export class RPCPoolProvider extends JsonRpcProvider {
     this._cooldown = new CooldownManager();
 
     const routerInputs = this.params.rpc.map((options, i) => {
-      const { weight, priority, network: _n, ...providerOptions } = options;
+      const { priority, network: _n, ...providerOptions } = options;
       const url = typeof options.url === 'string' ? options.url : options.url.url;
       const providerId = `rpc#${i + 1}-chainId:${this.params.network}-${url}`;
 
@@ -54,7 +53,7 @@ export class RPCPoolProvider extends JsonRpcProvider {
       });
 
       const endpoint: Endpoint = { providerId, url, provider };
-      return { endpoint, weight: weight ?? 1, priority: priority ?? 0 };
+      return { endpoint, priority: priority ?? 0 };
     });
 
     this.router = new Router(routerInputs, this._cooldown);
@@ -109,6 +108,9 @@ export class RPCPoolProvider extends JsonRpcProvider {
   private _handleTransportEvent(e: RpcEvent): void {
     this._stats.onEvent(e);
     this._cooldown.onEvent(e);
+    if (e.type === 'response' || e.type === 'error') {
+      this.router.recordLatency(e.providerId, e.ms);
+    }
     this.params.hooks?.onEvent?.(e);
   }
 

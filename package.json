@@ -1,6 +1,6 @@
 {
   "name": "ethers-rpc-pool",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "EVM RPC multiplexer for ethers.js with load balancing, rate limiting, failover and consistency controls.",
   "license": "MIT",
   "keywords": [

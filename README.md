@@ -71,6 +71,7 @@ ethers.js ships with a built-in `FallbackProvider`. Here is how the two compare:
 | Retries on transport errors only (not on logical errors) |       ✅        |              ❌               |
 | Structured observability events (`RpcEvent`)             |       ✅        |              ❌               |
 | Per-provider stats snapshot                              |       ✅        |              ❌               |
+| EWMA latency-based routing (P2C)                         |       ✅        |              ❌               |
 | Sequential failover (one endpoint at a time)             |       ✅        | ❌ (fires all simultaneously) |
 | ethers.js v6 compatible                                  |       ✅        |              ✅               |
 | Drop-in library (no extra infra)                         |       ✅        |              ✅               |
@@ -95,7 +96,7 @@ Several recurring problems are documented in the ethers.js issue tracker:
 
 ## Features
 
-- 🔀 Load balancing across multiple RPC endpoints
+- 🔀 Load balancing with EWMA latency-based routing (P2C) across multiple RPC endpoints
 - 🚦 Per-endpoint concurrency limit (`inFlight`)
 - 🔁 Retry with exponential backoff and jitter
 - ⚡ Automatic failover on retryable errors
@@ -176,6 +177,7 @@ interface RPCPoolProviderParams {
 // Per-endpoint values override defaultRpcOptions.
 interface RpcEndpointOptions {
   url: string | FetchRequest; // endpoint URL
+  priority?: number; // routing tier (default 0, higher = tried first)
 
   // ethers-rpc-pool options (all optional; fall back to defaultRpcOptions):
   inFlight?: number;
@@ -207,16 +209,15 @@ interface RpcEndpointOptions {
 
 ### Per-Endpoint Options
 
-| Option     | Default | Description                                                                                                                              |
-| ---------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `url`      | —       | RPC endpoint URL (required)                                                                                                              |
-| `priority` | `0`     | Routing tier. Higher value = tried first. Endpoints with the same priority share traffic via weighted round-robin.                       |
-| `weight`   | `1`     | Proportional traffic share within the same priority tier. An endpoint with `weight: 3` receives 3× more picks than one with `weight: 1`. |
-| `inFlight` | `1`     | Max concurrent in-flight requests                                                                                                        |
-| `timeout`  | `10000` | HTTP timeout in ms                                                                                                                       |
-| `rps`      | `10`    | Sustained request rate (requests/sec). Enforced by a token bucket.                                                                       |
-| `rpsBurst` | `= rps` | Burst capacity. Allows short spikes above `rps` by consuming tokens accumulated during idle time.                                        |
-| `...`      | —       | Any [ethers.JsonRpcApiProviderOptions](https://docs.ethers.org/v6/api/providers/jsonrpc/#JsonRpcApiProviderOptions) are also accepted.   |
+| Option     | Default | Description                                                                                                                            |
+| ---------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`      | —       | RPC endpoint URL (required)                                                                                                            |
+| `priority` | `0`     | Routing tier. Higher value = tried first. When all endpoints in a tier are unavailable, routing falls through to the next tier.        |
+| `inFlight` | `1`     | Max concurrent in-flight requests                                                                                                      |
+| `timeout`  | `10000` | HTTP timeout in ms                                                                                                                     |
+| `rps`      | `10`    | Sustained request rate (requests/sec). Enforced by a token bucket.                                                                     |
+| `rpsBurst` | `= rps` | Burst capacity. Allows short spikes above `rps` by consuming tokens accumulated during idle time.                                      |
+| `...`      | —       | Any [ethers.JsonRpcApiProviderOptions](https://docs.ethers.org/v6/api/providers/jsonrpc/#JsonRpcApiProviderOptions) are also accepted. |
 
 ---
 
@@ -224,13 +225,15 @@ interface RpcEndpointOptions {
 
 ### 1. Routing
 
-Endpoints are grouped by `priority` and tried high→low. Within each group, traffic is distributed by weighted round-robin according to `weight`. If every endpoint in a group is unavailable, routing falls through to the next tier. If every endpoint across all tiers is unavailable, the pool returns from the highest-priority group anyway — it never deadlocks.
+Endpoints are grouped by `priority` and tried high→low. Within each priority tier, the router uses **EWMA latency + Power of Two Choices (P2C)**: two candidates are drawn at random from the available pool and the one with the lower exponentially-weighted moving average latency (α = 0.2) is picked. Unsampled endpoints start at EWMA = 0 and are naturally explored before measured ones. Both successful responses and errors contribute to the EWMA, so a slow or failing endpoint is progressively deprioritised even before its circuit opens.
+
+If every endpoint in a tier is unavailable, routing falls through to the next tier. If every endpoint across all tiers is unavailable, the pool falls back to round-robin over the highest-priority group — it never deadlocks.
 
 ```ts
 rpc: [
   { url: 'https://alchemy.com/...', priority: 1 }, // tried first
-  { url: 'https://eth.drpc.org', priority: 0 }, // fallback
-  { url: 'https://eth1.lava.build', priority: 0, weight: 2 }, // 2× share in fallback tier
+  { url: 'https://eth.drpc.org', priority: 0 }, // fallback tier
+  { url: 'https://eth1.lava.build', priority: 0 }, // shares fallback tier; EWMA decides the split
 ];
 ```
 
@@ -547,7 +550,6 @@ const snapshot = pool.getSnapshot();
 
 ### Known Limitations
 
-- No adaptive health scoring or latency-based routing
 - No sticky session / blockTag consistency (a retry may land on a provider with a different block height)
 - Archive, debug, and trace methods work only if the underlying RPC supports them
 
@@ -601,9 +603,7 @@ Not intended for:
 
 ## Roadmap
 
-- Health scoring / adaptive latency-based routing
 - Sticky session / blockTag consistency
-- Adaptive latency-based routing
 - Singleflight request deduplication
 
 ---
