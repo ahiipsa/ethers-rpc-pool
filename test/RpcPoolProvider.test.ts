@@ -393,6 +393,8 @@ describe('RPCPoolProvider', () => {
     expect(snap).toHaveProperty('total');
     expect(snap).toHaveProperty('providerCooldownUntil');
     expect(typeof snap.providerCooldownUntil).toBe('object');
+    expect(snap).toHaveProperty('perProviderLatencyEwma');
+    expect(typeof snap.perProviderLatencyEwma).toBe('object');
   });
 
   it('send(): respects RPS limit by delaying requests when rate limit is reached', async () => {

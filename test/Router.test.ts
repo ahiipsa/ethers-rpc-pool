@@ -227,6 +227,38 @@ describe('RpcRouter', () => {
     });
   });
 
+  describe('ewmaSnapshot', () => {
+    it('returns empty object when no latencies recorded', () => {
+      const availability: IAvailabilityChecker = { isInCooldown: () => false };
+      const router = new Router([entry('a'), entry('b')], availability);
+
+      expect(router.ewmaSnapshot()).toEqual({});
+    });
+
+    it('returns recorded EWMA values', () => {
+      const availability: IAvailabilityChecker = { isInCooldown: () => false };
+      const router = new Router([entry('a'), entry('b')], availability);
+
+      router.recordLatency('a', 100);
+      router.recordLatency('b', 200);
+
+      const snap = router.ewmaSnapshot();
+      expect(snap['a']).toBe(100);
+      expect(snap['b']).toBe(200);
+    });
+
+    it('returns a plain object copy (mutation does not affect router state)', () => {
+      const availability: IAvailabilityChecker = { isInCooldown: () => false };
+      const router = new Router([entry('a')], availability);
+
+      router.recordLatency('a', 50);
+      const snap = router.ewmaSnapshot();
+      snap['a'] = 9999;
+
+      expect(router.ewmaSnapshot()['a']).toBe(50);
+    });
+  });
+
   describe('size and totalSlots', () => {
     it('size() returns unique endpoint count', () => {
       const availability: IAvailabilityChecker = { isInCooldown: () => false };

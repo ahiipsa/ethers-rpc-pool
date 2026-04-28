@@ -476,24 +476,25 @@ const pool = new RPCPoolProvider({
 const snapshot = pool.getSnapshot();
 ```
 
-| Field                    | Description                                                                            |
-| ------------------------ | -------------------------------------------------------------------------------------- |
-| `total`                  | Total requests sent (counts each retry attempt)                                        |
-| `inFlight`               | Currently in-flight requests across all endpoints                                      |
-| `perMethodTotal`         | Request count per JSON-RPC method                                                      |
-| `rateLimitedTotal`       | Total 429/rate-limit errors                                                            |
-| `perProviderRateLimited` | Rate-limit errors per endpoint                                                         |
-| `timeoutTotal`           | Total timeout errors                                                                   |
-| `perProviderTimeout`     | Timeout errors per endpoint                                                            |
-| `perProviderTotal`       | Total requests per endpoint                                                            |
-| `perProviderInFlight`    | Currently in-flight requests per endpoint                                              |
-| `perProviderError`       | Transport errors (5xx, network) per endpoint                                           |
-| `rpcErrorTotal`          | Total RPC logical errors (revert, invalid params, etc.)                                |
-| `perProviderRpcError`    | RPC logical errors per endpoint, broken down by method                                 |
-| `perMethodRpcError`      | RPC logical errors per method                                                          |
-| `perProviderMethod`      | Request count per endpoint per method                                                  |
-| `providerCooldownUntil`  | Unix timestamp (ms) when each endpoint's cooldown ends                                 |
-| `providerCircuitState`   | Circuit breaker state per endpoint (`'open'` or `'half-open'`; absent when `'closed'`) |
+| Field                    | Description                                                                                                                              |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `total`                  | Total requests sent (counts each retry attempt)                                                                                          |
+| `inFlight`               | Currently in-flight requests across all endpoints                                                                                        |
+| `perMethodTotal`         | Request count per JSON-RPC method                                                                                                        |
+| `rateLimitedTotal`       | Total 429/rate-limit errors                                                                                                              |
+| `perProviderRateLimited` | Rate-limit errors per endpoint                                                                                                           |
+| `timeoutTotal`           | Total timeout errors                                                                                                                     |
+| `perProviderTimeout`     | Timeout errors per endpoint                                                                                                              |
+| `perProviderTotal`       | Total requests per endpoint                                                                                                              |
+| `perProviderInFlight`    | Currently in-flight requests per endpoint                                                                                                |
+| `perProviderError`       | Transport errors (5xx, network) per endpoint                                                                                             |
+| `rpcErrorTotal`          | Total RPC logical errors (revert, invalid params, etc.)                                                                                  |
+| `perProviderRpcError`    | RPC logical errors per endpoint, broken down by method                                                                                   |
+| `perMethodRpcError`      | RPC logical errors per method                                                                                                            |
+| `perProviderMethod`      | Request count per endpoint per method                                                                                                    |
+| `providerCooldownUntil`  | Unix timestamp (ms) when each endpoint's cooldown ends                                                                                   |
+| `providerCircuitState`   | Circuit breaker state per endpoint (`'open'` or `'half-open'`; absent when `'closed'`)                                                   |
+| `perProviderLatencyEwma` | EWMA latency in ms (α = 0.2) per endpoint, as used by the router for P2C decisions. Absent for endpoints that have not yet been sampled. |
 
 ### Example output:
 
@@ -534,6 +535,11 @@ const snapshot = pool.getSnapshot();
   },
   "perProviderMethod": {
     "rpc#1-chainId:1-https://eth.drpc.org": { "eth_blockNumber": 21 }
+  },
+  "perProviderLatencyEwma": {
+    "rpc#1-chainId:1-https://eth.drpc.org": 142.3,
+    "rpc#2-chainId:1-https://eth1.lava.build": 98.7,
+    "rpc#3-chainId:1-https://rpc.mevblocker.io": 201.5
   }
 }
 ```

@@ -12,6 +12,7 @@ export interface RpcStatsSnapshot {
   perProviderTotal: Record<string, number>;
   providerCooldownUntil: Record<string, number>;
   providerCircuitState: Record<string, CircuitState>;
+  perProviderLatencyEwma: Record<string, number>;
   perProviderInFlight: Record<string, number>;
   perProviderError: Record<string, number>;
   rpcErrorTotal: number;
@@ -20,7 +21,10 @@ export interface RpcStatsSnapshot {
   perProviderMethod: Record<string, Record<string, number>>;
 }
 
-type MetricsSnapshot = Omit<RpcStatsSnapshot, 'providerCooldownUntil' | 'providerCircuitState'>;
+type MetricsSnapshot = Omit<
+  RpcStatsSnapshot,
+  'providerCooldownUntil' | 'providerCircuitState' | 'perProviderLatencyEwma'
+>;
 
 export class Stats {
   private _total = 0;

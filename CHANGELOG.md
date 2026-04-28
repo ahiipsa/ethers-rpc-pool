@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0] — 2026-04-28
+
+### Added
+
+- `RpcStatsSnapshot.perProviderLatencyEwma` — EWMA latency (ms, α = 0.2) per endpoint, as tracked by the router for P2C decisions. Exposed via `getSnapshot()`. Endpoints with no recorded measurements are absent from the map (not `0`).
+- `Router.ewmaSnapshot()` — returns a plain `Record<string, number>` copy of the internal EWMA map; used internally by `RPCPoolProvider.getSnapshot()`.
+
 ## [3.0.0] — 2026-04-28
 
 ### Changed

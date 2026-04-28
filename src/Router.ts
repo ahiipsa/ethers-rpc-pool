@@ -46,6 +46,10 @@ export class Router {
     this._ewma.set(providerId, prev === undefined ? ms : EWMA_ALPHA * ms + (1 - EWMA_ALPHA) * prev);
   }
 
+  ewmaSnapshot(): Record<string, number> {
+    return Object.fromEntries(this._ewma);
+  }
+
   pick(): Endpoint {
     for (const group of this._groups) {
       const ep = this._pickFromGroup(group);

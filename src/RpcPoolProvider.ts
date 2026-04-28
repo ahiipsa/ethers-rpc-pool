@@ -102,6 +102,7 @@ export class RPCPoolProvider extends JsonRpcProvider {
       ...this._stats.snapshot(),
       providerCooldownUntil: this._cooldown.cooldownSnapshot(),
       providerCircuitState: this._cooldown.circuitStateSnapshot(),
+      perProviderLatencyEwma: this.router.ewmaSnapshot(),
     };
   }
 
