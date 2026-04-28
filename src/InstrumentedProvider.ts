@@ -10,6 +10,7 @@ import { Semaphore } from './Semaphore';
 import {
   getHttpStatus,
   getRetryAfterMs,
+  isNetworkError,
   isRateLimitError,
   isTimeoutError,
   RpcEvent,
@@ -114,6 +115,7 @@ export class InstrumentedJsonRpcProvider extends JsonRpcProvider {
       const endedAt = Date.now();
       const rl = isRateLimitError(e);
       const isTimeout = isTimeoutError(e);
+      const ne = isNetworkError(e);
       const retryAfterMs = getRetryAfterMs(e) ?? undefined;
 
       for (const p of payloads) {
@@ -127,6 +129,7 @@ export class InstrumentedJsonRpcProvider extends JsonRpcProvider {
           ms: endedAt - startedAt,
           isRateLimit: rl,
           isTimeout,
+          isNetworkError: ne,
           status: getHttpStatus(e),
           retryAfterMs,
           code: e?.code,

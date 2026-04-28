@@ -137,6 +137,7 @@ export class RPCPoolProvider extends JsonRpcProvider {
       ms: endedAt - startedAt,
       isRateLimit: false,
       isTimeout: false,
+      isNetworkError: false,
       status: undefined,
       code: error?.code,
       message: String(error?.message || error),

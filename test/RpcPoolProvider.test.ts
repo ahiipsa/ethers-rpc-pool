@@ -104,6 +104,40 @@ describe('RPCPoolProvider', () => {
     expect(ep2.provider.send).toHaveBeenCalledTimes(1);
   });
 
+  it('send(): failover on ECONNREFUSED and succeeds on second endpoint', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+
+    const connErr: any = new Error('connect ECONNREFUSED 127.0.0.1:8545');
+    connErr.code = 'ECONNREFUSED';
+
+    const ep1 = mkEndpoint('p1', async () => {
+      throw connErr;
+    });
+    const ep2 = mkEndpoint('p2', async () => 'OK2');
+
+    const pool = new RPCPoolProvider({
+      network: 1,
+      rpc: [{ url: 'http://rpc1.example' }, { url: 'http://rpc2.example' }],
+      defaultRpcOptions: { inFlight: 1 },
+      retry: { attempts: 2 },
+    });
+
+    const pickSpy = vi.spyOn(pool.router, 'pick').mockReturnValueOnce(ep1).mockReturnValueOnce(ep2);
+    vi.spyOn(pool.router, 'size').mockReturnValue(2);
+
+    const promise = pool.send('eth_blockNumber', []);
+
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(0);
+
+    await expect(promise).resolves.toBe('OK2');
+
+    expect(pickSpy).toHaveBeenCalledTimes(2);
+    expect(ep1.provider.send).toHaveBeenCalledTimes(1);
+    expect(ep2.provider.send).toHaveBeenCalledTimes(1);
+  });
+
   it('send(): does NOT failover on non-failover errors (e.g. 400) and throws immediately', async () => {
     const badReq: any = new Error('bad request');
     badReq.status = 400;

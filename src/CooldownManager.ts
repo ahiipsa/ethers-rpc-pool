@@ -121,7 +121,7 @@ export class CooldownManager implements IAvailabilityChecker {
       return;
     }
 
-    if (e.status !== undefined && e.status >= 500) {
+    if ((e.status !== undefined && e.status >= 500) || e.isNetworkError) {
       this._openWithBackoff(id);
     }
   }

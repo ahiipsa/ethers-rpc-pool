@@ -177,6 +177,29 @@ describe('InstrumentedStaticJsonRpcProvider', () => {
     }
   });
 
+  it('network error (ECONNREFUSED): emits error event with isNetworkError=true', async () => {
+    const err: any = new Error('connect ECONNREFUSED 127.0.0.1:19999');
+    err.code = 'ECONNREFUSED';
+    vi.spyOn(JsonRpcProvider.prototype, '_send').mockRejectedValue(err);
+
+    const events: RpcEvent[] = [];
+    const provider = new InstrumentedJsonRpcProvider('http://example.invalid', 1, {
+      providerId: 'p1',
+      onEvent: (e) => events.push(e),
+    });
+
+    await expect(provider.send('eth_blockNumber', [])).rejects.toThrow('ECONNREFUSED');
+
+    const errorEvent = events.find((e) => e.type === 'error');
+    expect(errorEvent?.type).toBe('error');
+    if (errorEvent?.type === 'error') {
+      expect(errorEvent.isNetworkError).toBe(true);
+      expect(errorEvent.isRateLimit).toBe(false);
+      expect(errorEvent.isTimeout).toBe(false);
+      expect(errorEvent.errorKind).toBe('transport');
+    }
+  });
+
   it('batch payload: emits one request+response event per payload', async () => {
     vi.spyOn(JsonRpcProvider.prototype, '_send').mockResolvedValue([
       { id: 1, result: 'r1' },

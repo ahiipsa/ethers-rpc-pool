@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   getHttpStatus,
   getRetryAfterMs,
+  isNetworkError,
   isRateLimitError,
   isRpcLogicalError,
   isServerError,
@@ -153,6 +154,31 @@ describe('isTimeoutError', () => {
   });
 });
 
+describe('isNetworkError', () => {
+  it('returns true for ECONNREFUSED', () => {
+    expect(isNetworkError({ code: 'ECONNREFUSED' })).toBe(true);
+  });
+
+  it('returns true for ECONNRESET', () => {
+    expect(isNetworkError({ code: 'ECONNRESET' })).toBe(true);
+  });
+
+  it('returns true for ENOTFOUND', () => {
+    expect(isNetworkError({ code: 'ENOTFOUND' })).toBe(true);
+  });
+
+  it('returns true for EAI_AGAIN', () => {
+    expect(isNetworkError({ code: 'EAI_AGAIN' })).toBe(true);
+  });
+
+  it('returns false for unrelated codes', () => {
+    expect(isNetworkError({ code: 'TIMEOUT' })).toBe(false);
+    expect(isNetworkError({ code: 'CALL_EXCEPTION' })).toBe(false);
+    expect(isNetworkError(new Error('connection refused'))).toBe(false);
+    expect(isNetworkError(null)).toBe(false);
+  });
+});
+
 describe('isTransportError', () => {
   it('returns true for timeout', () => {
     expect(isTransportError({ code: 'TIMEOUT' })).toBe(true);
@@ -164,6 +190,12 @@ describe('isTransportError', () => {
 
   it('returns true for server error', () => {
     expect(isTransportError({ status: 500 })).toBe(true);
+  });
+
+  it('returns true for network errors (ECONNREFUSED etc)', () => {
+    expect(isTransportError({ code: 'ECONNREFUSED' })).toBe(true);
+    expect(isTransportError({ code: 'ECONNRESET' })).toBe(true);
+    expect(isTransportError({ code: 'ENOTFOUND' })).toBe(true);
   });
 
   it('returns false for unrelated errors', () => {
@@ -234,6 +266,13 @@ describe('shouldFailover', () => {
 
   it('returns true for server error', () => {
     expect(shouldFailover({ status: 500 })).toBe(true);
+  });
+
+  it('returns true for network errors (ECONNREFUSED, ECONNRESET, ENOTFOUND)', () => {
+    expect(shouldFailover({ code: 'ECONNREFUSED' })).toBe(true);
+    expect(shouldFailover({ code: 'ECONNRESET' })).toBe(true);
+    expect(shouldFailover({ code: 'ENOTFOUND' })).toBe(true);
+    expect(shouldFailover({ code: 'EAI_AGAIN' })).toBe(true);
   });
 
   it('returns false for logical RPC errors', () => {

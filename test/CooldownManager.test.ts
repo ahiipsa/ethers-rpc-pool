@@ -32,6 +32,7 @@ function errorEvent(
     ms: 1,
     isRateLimit: false,
     isTimeout: false,
+    isNetworkError: false,
     message: 'error',
     ...overrides,
   };
@@ -212,8 +213,55 @@ describe('CooldownManager', () => {
     });
   });
 
+  describe('network error (ECONNREFUSED etc)', () => {
+    it('sets initial 10s cooldown via backoff', () => {
+      vi.useFakeTimers();
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      const mgr = new CooldownManager();
+
+      mgr.onEvent(errorEvent({ isNetworkError: true }));
+
+      expect(mgr.isInCooldown('p1')).toBe(true);
+      vi.advanceTimersByTime(10_001);
+      expect(mgr.isInCooldown('p1')).toBe(false);
+    });
+
+    it('doubles cooldown on each subsequent network error', () => {
+      vi.useFakeTimers();
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      const mgr = new CooldownManager();
+
+      mgr.onEvent(errorEvent({ isNetworkError: true })); // 10_000
+      const snap1 = mgr.cooldownSnapshot()['p1'];
+
+      mgr.onEvent(errorEvent({ isNetworkError: true })); // 20_000
+      const snap2 = mgr.cooldownSnapshot()['p1'];
+
+      const now = Date.now();
+      expect(snap1).toBe(now + 10_000);
+      expect(snap2).toBe(now + 20_000);
+    });
+
+    it('resets cooldown doubling after a successful response', () => {
+      vi.useFakeTimers();
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      const mgr = new CooldownManager();
+
+      mgr.onEvent(errorEvent({ isNetworkError: true })); // 10_000
+      const snap1 = mgr.cooldownSnapshot()['p1'];
+
+      mgr.onEvent(responseEvent()); // reset
+      mgr.onEvent(errorEvent({ isNetworkError: true })); // back to 10_000
+      const snap2 = mgr.cooldownSnapshot()['p1'];
+
+      const now = Date.now();
+      expect(snap1).toBe(now + 10_000);
+      expect(snap2).toBe(now + 10_000);
+    });
+  });
+
   describe('does not trigger cooldown on non-failover errors', () => {
-    it('no status, not rate limit, not timeout', () => {
+    it('no status, not rate limit, not timeout, not network error', () => {
       const mgr = new CooldownManager();
       mgr.onEvent(errorEvent({ status: undefined }));
       expect(mgr.isInCooldown('p1')).toBe(false);

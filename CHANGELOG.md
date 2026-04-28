@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.1] — 2026-04-28
+
+### Fixed
+
+- Network-level errors (`ECONNREFUSED`, `ECONNRESET`, `ENOTFOUND`, `EAI_AGAIN`) now correctly trigger failover to another endpoint. Previously `shouldFailover()` returned `false` for these errors — if an endpoint was completely unreachable (server down, port closed, DNS failure), the error was thrown to the caller immediately with no retry. `CooldownManager` also now opens the circuit with exponential backoff on network errors, matching the behaviour for 5xx server errors.
+- `RpcEvent` error variant gains a new `isNetworkError: boolean` field, populated by `InstrumentedJsonRpcProvider`.
+
 ## [3.1.0] — 2026-04-28
 
 ### Added

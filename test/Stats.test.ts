@@ -24,6 +24,7 @@ function errorEvent(
     ms: 1,
     isRateLimit: false,
     isTimeout: false,
+    isNetworkError: false,
     message: 'error',
     ...overrides,
   };

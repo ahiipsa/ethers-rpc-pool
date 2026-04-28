@@ -33,6 +33,7 @@ export type RpcEvent =
       ms: number;
       isRateLimit: boolean;
       isTimeout: boolean;
+      isNetworkError: boolean;
       status?: number;
       retryAfterMs?: number;
       code?: string;
@@ -88,8 +89,14 @@ export function isTimeoutError(e: any): boolean {
   return /timeout|timed out|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNABORTED|504 Gateway/i.test(msg);
 }
 
+const NETWORK_ERROR_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN']);
+
+export function isNetworkError(e: any): boolean {
+  return NETWORK_ERROR_CODES.has(e?.code);
+}
+
 export function isTransportError(e: any): boolean {
-  return isTimeoutError(e) || isRateLimitError(e) || isServerError(e);
+  return isTimeoutError(e) || isRateLimitError(e) || isServerError(e) || isNetworkError(e);
 }
 
 /**
@@ -118,10 +125,5 @@ export function isRpcLogicalError(e: any): boolean {
 }
 
 export function shouldFailover(e: any): boolean {
-  const to = isTimeoutError(e);
-  const rl = isRateLimitError(e);
-  const se = isServerError(e);
-
-  // failover on timeouts and rate limits, but not on logical errors (e.g. invalid params)
-  return to || rl || se;
+  return isTimeoutError(e) || isRateLimitError(e) || isServerError(e) || isNetworkError(e);
 }
