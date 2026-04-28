@@ -8,7 +8,7 @@ import {
 import { Router } from './Router';
 import { CooldownManager } from './CooldownManager';
 
-interface RPCPoolProviderOptions extends Partial<InstrumentedJsonRpcProviderOptions> {
+export interface RPCPoolProviderOptions extends Partial<InstrumentedJsonRpcProviderOptions> {
   url: string | FetchRequest;
   network?: Networkish;
   priority?: number;
