@@ -35,6 +35,7 @@ Designed for production backends and dApps that need:
   - [Rate Limiting](#3-rate-limiting)
   - [Retry Strategy](#4-retry-strategy)
   - [Circuit Breaker](#5-circuit-breaker)
+  - [Pinned Provider](#6-pinned-provider)
 - [Instrumentation & Metrics](#instrumentation--metrics)
   - [RpcEvent](#rpcevent)
   - [Stats Snapshot](#stats-snapshot)
@@ -101,6 +102,7 @@ Several recurring problems are documented in the ethers.js issue tracker:
 - 🔁 Retry with exponential backoff and jitter
 - ⚡ Automatic failover on retryable errors
 - 🔒 Circuit breaker with half-open probe per endpoint
+- 📍 Pinned provider for consistent chain-state reads across multiple calls
 - 📊 Built-in request statistics
 - 🧩 Drop-in replacement for `JsonRpcProvider`
 - ✅ 100 % test coverage (lines, statements, functions)
@@ -318,6 +320,23 @@ closed ──(error threshold)──▶ open ──(cooldown expires)──▶ h
 When the probe succeeds the circuit closes and traffic resumes normally. When the probe fails the circuit re-opens with an escalated cooldown (exponential backoff for 5xx/timeout; `Retry-After` for rate-limits).
 
 The current circuit state for each endpoint is included in `getSnapshot()` under `providerCircuitState`.
+
+### 6. Pinned Provider
+
+Different RPC nodes may lag behind by different numbers of blocks. When requests from the same logical flow go to different endpoints, the client can observe inconsistent state — `eth_getBalance` returns data from block 100, but the next `eth_call` lands on a node at block 99. This is especially dangerous in DeFi: read state → build transaction → node doesn't "see" the previous block yet.
+
+`pinnedProvider()` selects the best available endpoint at call time and returns its `InstrumentedJsonRpcProvider` directly. All subsequent calls through that provider go to the same node.
+
+```ts
+const pinned = pool.pinnedProvider();
+
+// All three calls go to the same RPC node:
+const balance = await pinned.getBalance('0x...');
+const nonce = await pinned.getTransactionCount('0x...');
+const code = await pinned.getCode('0x...');
+```
+
+The endpoint is selected using the same P2C/EWMA routing as `pool.send()`. Since the returned provider is a plain `InstrumentedJsonRpcProvider`, there is no automatic failover — if the pinned node goes down mid-session, call `pinnedProvider()` again to re-pin to a healthy endpoint.
 
 ---
 
@@ -556,7 +575,7 @@ const snapshot = pool.getSnapshot();
 
 ### Known Limitations
 
-- No sticky session / blockTag consistency (a retry may land on a provider with a different block height)
+- `pinnedProvider()` has no automatic failover — if the pinned node goes down, call it again to re-pin
 - Archive, debug, and trace methods work only if the underlying RPC supports them
 
 ---
@@ -609,7 +628,6 @@ Not intended for:
 
 ## Roadmap
 
-- Sticky session / blockTag consistency
 - Singleflight request deduplication
 
 ---

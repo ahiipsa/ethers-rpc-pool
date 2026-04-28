@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { RPCPoolProvider } from '../src/RpcPoolProvider';
+import { InstrumentedJsonRpcProvider } from '../src/InstrumentedProvider';
 import { Router } from '../src/Router';
 import type { Endpoint } from '../src/utils';
 import { FetchRequest, JsonRpcProvider } from 'ethers';
@@ -462,5 +463,17 @@ describe('RPCPoolProvider', () => {
 
     await expect(p2).resolves.toBe('OK');
     expect(baseSend).toHaveBeenCalledTimes(2);
+  });
+
+  it('pinnedProvider(): returns the InstrumentedJsonRpcProvider selected by router.pick()', () => {
+    const pool = new RPCPoolProvider({
+      network: 1,
+      rpc: [{ url: 'http://rpc1.example' }, { url: 'http://rpc2.example' }],
+      defaultRpcOptions: { inFlight: 1 },
+      retry: { attempts: 1 },
+    });
+
+    const provider = pool.pinnedProvider();
+    expect(provider).toBeInstanceOf(InstrumentedJsonRpcProvider);
   });
 });

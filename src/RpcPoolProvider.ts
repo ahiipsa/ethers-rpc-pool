@@ -24,8 +24,6 @@ export interface RPCPoolProviderParams {
   };
 }
 
-// TODO: sticky "session"
-
 export class RPCPoolProvider extends JsonRpcProvider {
   readonly router: Router;
   readonly params: RPCPoolProviderParams;
@@ -104,6 +102,14 @@ export class RPCPoolProvider extends JsonRpcProvider {
       providerCircuitState: this._cooldown.circuitStateSnapshot(),
       perProviderLatencyEwma: this.router.ewmaSnapshot(),
     };
+  }
+
+  // Returns a provider pinned to a single RPC node selected right now.
+  // Use when consecutive calls must see consistent chain state — e.g. read
+  // eth_getBalance on block N, then eth_call on the same block N. Without
+  // pinning, each call may route to a different node that lags behind.
+  pinnedProvider(): InstrumentedJsonRpcProvider {
+    return this.router.pick().provider;
   }
 
   private _handleTransportEvent(e: RpcEvent): void {
