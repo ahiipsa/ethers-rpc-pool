@@ -43,3 +43,6 @@ scripts/
 # Claude Code
 .claude/
 CLAUDE.md
+
+# GitHub Actions
+.github/workflows
