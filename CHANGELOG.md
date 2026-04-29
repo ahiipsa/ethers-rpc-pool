@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0] — 2026-04-29
+
 ### Added
 
 - `RPCPoolProvider.pinnedProvider()` — returns an `InstrumentedJsonRpcProvider` pinned to the single best endpoint selected at call time (via the same P2C/EWMA routing as `send()`). Use when consecutive calls must observe consistent chain state — e.g. `eth_getBalance` followed by `eth_call` on the same block. Without pinning each call may route to a different node that lags behind.
